@@ -36,10 +36,13 @@ button{cursor:pointer}
 .num{font-variant-numeric:tabular-nums}
 
 header{position:sticky;top:0;z-index:5;background:#14202b;color:#e9edef;padding-top:env(safe-area-inset-top,0px)}
-header .wrap{padding-block:12px 10px;display:flex;flex-direction:column;gap:10px}
+header .wrap{padding-block:12px 10px;}
+.evname::after{content:' ▾';font-size:.7em;opacity:.7}
+#evsheet .evbtn{font:inherit}
+header .wrap{display:flex;flex-direction:column;gap:10px}
 .top{display:flex;align-items:center;gap:10px;min-width:0}
 .mark{width:30px;height:22px;flex:none;border-radius:3px;background:repeating-linear-gradient(90deg,#f2b705 0 4px,#c99700 4px 6px)}
-.evname{font:800 24px/1 var(--display);letter-spacing:.02em;text-transform:uppercase;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.evname{background:none;border:0;padding:0;color:inherit;text-align:left;cursor:pointer;font:800 24px/1 var(--display);letter-spacing:.02em;text-transform:uppercase;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .conn{font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid currentColor;border-radius:99px;padding:2px 8px;opacity:.85;white-space:nowrap}
 .conn.off{color:#f0a94a}
 .chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px}
@@ -159,11 +162,12 @@ nav.tabs .dot{position:absolute;top:8px;left:calc(50% + 8px);width:8px;height:8p
 <body>
 <header>
   <div class="wrap gut">
-    <div class="top"><span class="mark" aria-hidden="true"></span><span class="evname" id="evname">Stan kontenerów</span><button class="conn" id="conn" data-acct type="button" style="background:none;font:inherit;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:inherit;cursor:pointer"></button></div>
+    <div class="top"><span class="mark" aria-hidden="true"></span><button class="evname" id="evname" type="button" data-evmenu aria-expanded="false">Stan kontenerów</button><button class="conn" id="conn" data-acct type="button" style="background:none;font:inherit;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:inherit;cursor:pointer"></button></div>
     <div class="chips" id="chips" role="group" aria-label="Zakres"></div>
   </div>
 </header>
 <main><div class="wrap gut">
+  <section id="evsheet" hidden></section>
   <section id="gate" hidden></section>
   <section id="v-stan"></section>
   <section id="v-dodaj" hidden></section>
@@ -543,7 +547,7 @@ const remOf=x=>x.inn-x.out+x.tin-x.tout;
    ====================================================================== */
 function renderHeader(){
   const e=ev();
-  $('#evname').textContent=e?e.name:'Stan kontenerów';
+  $('#evname').textContent=e?e.name:(store&&!gate?'Wybierz event':'Stan kontenerów');
   const c=$('#conn');
   c.textContent=fb?(store?'Wspólna baza':'Nie zalogowano'):!store?'Łączę…':'Tylko to urządzenie';
   c.className='conn'+(fb&&store?'':' off');
@@ -556,7 +560,7 @@ function renderHeader(){
 function noEvent(){
   if(!store&&!storeErr) return `<div class="empty"><p class="muted">Łączę z bazą…</p></div>`;
   if(storeErr) return `<div class="empty"><h2>Nie udało się połączyć z bazą</h2><p class="muted">${esc(storeErr)}</p><div class="btns"><button class="btn" data-go="ust" data-ust="baza">Sprawdź połączenie</button></div></div>`;
-  return `<div class="empty"><h2>Zacznij od eventu</h2><p class="muted">Utwórz event i podaj, ile masz kontenerów.</p><div class="btns"><button class="btn" data-go="ust" data-ust="event">Utwórz event</button></div></div>`;
+  return `<div class="empty"><h2>Zacznij od eventu</h2><p class="muted">Utwórz event i podaj, ile masz kontenerów.</p><div class="btns"><button class="btn" data-evmenu>Utwórz event</button></div></div>`;
 }
 
 function renderStan(){
@@ -805,6 +809,20 @@ function renderProds(){
   if(!ps.length) return `<div class="panel"><p class="muted">Produkty pojawią się po wgraniu pierwszego zamówienia.</p></div>`;
   return `<div class="panel"><h2>Produkty</h2><p class="small muted">Kategoria decyduje, w której grupie produkt widać na stanie.</p><div>${ps.map(([k,p])=>`<div class="link"><div class="t"><b>${esc(p.name)}</b><span class="small muted num">${k.startsWith('m_')?'dopisany ręcznie':esc(k)}</span></div><select class="in" data-pcat="${esc(k)}" aria-label="Kategoria">${Object.entries(CATS).map(([c,n])=>`<option value="${c}"${p.cat===c?' selected':''}>${n}</option>`).join('')}</select></div>`).join('')}</div></div>`;
 }
+function newEventForm(first){
+  const e=ev();
+  return `<div class="panel"><h2>${first?'Zacznij od eventu':'Nowy event'}</h2>
+    <div class="row2"><label class="f">Nazwa eventu<input class="in" data-nev="name" placeholder="np. Festiwal, sierpień"></label><label class="f">Liczba kontenerów<input class="in" data-nev="n" type="number" min="1" max="30" value="2"></label></div>
+    ${e&&(Object.keys(e.links||{}).length||Object.keys(e.products||{}).length)?`<label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-nev="copy" checked> Skopiuj produkty i powiązania z „${esc(e.name)}”</label>`:''}
+    <div class="btns"><button class="btn" data-newev>Utwórz event</button>${first?'':'<button class="btn ghost" data-evclose>Zamknij</button>'}</div></div>`;
+}
+let evMenu=false;
+function renderEvSheet(){
+  const sh=$('#evsheet');const on=evMenu&&!gate&&!!store;
+  sh.hidden=!on;$('#evname').setAttribute('aria-expanded',String(on));
+  if(!on) return;
+  sh.innerHTML=(events.length?`<div class="panel"><h3>Wybierz event</h3><div style="display:flex;flex-direction:column;gap:6px">${events.map(x=>`<button class="evbtn" data-ev="${esc(x.id)}" aria-current="${x.id===evId}"><span>${esc(x.name)}</span><span class="small muted">${(x.containers||[]).length} kont.</span></button>`).join('')}</div></div>`:'')+newEventForm(!events.length);
+}
 function renderEventSet(){
   const e=ev();let h='';
   if(!store) return `<div class="panel"><p class="muted">${storeErr?esc(storeErr):'Łączę z bazą…'}</p></div>`;
@@ -817,10 +835,7 @@ function renderEventSet(){
   }
   if(events.length) h+=`<div class="panel"><h3>Eventy</h3><div style="display:flex;flex-direction:column;gap:6px">${events.map(x=>`<button class="evbtn" data-ev="${esc(x.id)}" aria-current="${x.id===evId}"><span>${esc(x.name)}</span><span class="small muted">${(x.containers||[]).length} kont.</span></button>`).join('')}</div>
     ${e?(confirmEv?`<div class="note err">Usunąć event „${esc(e.name)}”? Lista produktów i powiązań zniknie.</div><div class="btns"><button class="btn danger sm" data-delev>Usuń event</button><button class="btn ghost" data-nodelev>Anuluj</button></div>`:`<div class="btns"><button class="btn ghost" data-askdelev>Usuń bieżący event</button></div>`):''}</div>`;
-  h+=`<div class="panel"><h2>${e?'Nowy event':'Zacznij od eventu'}</h2>
-    <div class="row2"><label class="f">Nazwa eventu<input class="in" id="nev-name" placeholder="np. Festiwal, sierpień"></label><label class="f">Liczba kontenerów<input class="in" id="nev-n" type="number" min="1" max="30" value="2"></label></div>
-    ${e&&Object.keys(e.links||{}).length?`<label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="nev-copy" checked> Skopiuj produkty i powiązania z „${esc(e.name)}”</label>`:''}
-    <div class="btns"><button class="btn" data-newev>Utwórz event</button></div></div>`;
+  h+=newEventForm(!e);
   return h;
 }
 function renderTeam(){
@@ -854,7 +869,7 @@ function renderBaza(){
    ZDARZENIA
    ====================================================================== */
 function setView(v){
-  view=v;for(const s of ['stan','dodaj','hist','ust'])$('#v-'+s).hidden=s!==v;
+  view=v;if(evMenu){evMenu=false;renderEvSheet()}for(const s of ['stan','dodaj','hist','ust'])$('#v-'+s).hidden=s!==v;
   document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.tab===v?'page':'false'));
   renderView(v);window.scrollTo(0,0);
 }
@@ -893,8 +908,8 @@ function renderGate(){
   return true;
 }
 function renderView(v){({stan:renderStan,dodaj:renderForm,hist:renderHist,ust:renderUst})[v]()}
-function renderAll(){renderHeader();if(renderGate())return;if(view!=='dodaj'||!draft)renderView(view);else renderForm()}
-function rerenderAll(){renderHeader();if(renderGate())return;const a=document.activeElement;if(view==='ust'&&a&&(a.dataset.cname||a.dataset.cshop||a.dataset.lp))return;renderView(view)}
+function renderAll(){renderHeader();renderEvSheet();if(renderGate())return;if(view!=='dodaj'||!draft)renderView(view);else renderForm()}
+function rerenderAll(){renderHeader();if(!(evMenu&&document.activeElement?.closest?.('#evsheet')))renderEvSheet();if(renderGate())return;const a=document.activeElement;if(view==='ust'&&a&&(a.dataset.cname||a.dataset.cshop||a.dataset.lp))return;renderView(view)}
 
 document.addEventListener('click',async e_=>{
   const t=e_.target.closest('button');if(!t)return;
@@ -924,15 +939,18 @@ document.addEventListener('click',async e_=>{
   if(D.lclear){openLink=null;await store.updateEvent(evId,{['links.'+D.lclear]:null});renderUst();return}
   if('lbulk' in D){const {unmapped}=compute();const p={};let n=0;for(const u of Object.values(unmapped)){if(suggest(u.i,u.name))continue;p['products.'+u.i]={name:prettyName(u.name),cat:guessCat(u.name)};n++}if(n){await store.updateEvent(evId,p);renderUst();toast(n+' poz. ustawiono jako osobne produkty.')}return}
   if(D.lself){const s=compute().seen[D.lself];const p={['links.'+D.lself]:null};if(!prods()[D.lself])p['products.'+D.lself]={name:prettyName(s?.name||D.lself),cat:guessCat(s?.name||'')};openLink=null;await store.updateEvent(evId,p);renderUst();toast('Dodano jako osobny produkt. Dopisz jego dostawy jako domówienie.');return}
-  if(D.ev){selectEvent(D.ev);return setView('stan')}
+  if(D.ev){evMenu=false;selectEvent(D.ev);return setView('stan')}
+  if('evmenu' in D){if(gate||!store)return;evMenu=!evMenu;renderEvSheet();if(evMenu)window.scrollTo(0,0);return}
+  if('evclose' in D){evMenu=false;return renderEvSheet()}
   if('addc' in D){const cs=[...conts(),{id:'c'+uid(),name:'Kontener '+(conts().length+1),shop:''}];await store.updateEvent(evId,{containers:cs});return}
   if('askdelev' in D){confirmEv=true;return renderUst()}
   if('nodelev' in D){confirmEv=false;return renderUst()}
   if('delev' in D){confirmEv=false;const id=evId;evId=null;await store.deleteEvent(id);toast('Usunięto event.');return}
   if('newev' in D){
-    const name=$('#nev-name').value.trim()||'Nowy event';const n=Math.max(1,Math.min(30,parseInt($('#nev-n').value)||1));const copy=$('#nev-copy')?.checked&&ev();
+    const P=t.closest('.panel'),q=k=>P.querySelector(`[data-nev="${k}"]`);
+    const name=q('name').value.trim()||'Nowy event';const n=Math.max(1,Math.min(30,parseInt(q('n').value)||1));const copy=q('copy')?.checked&&ev();
     t.disabled=true;
-    try{const id=await store.createEvent({name,containers:Array.from({length:n},(_,i)=>({id:'c'+uid()+i,name:'Kontener '+(i+1),shop:''})),products:copy?{...copy.products}:{},links:copy?{...copy.links}:{},createdAt:Date.now()});selectEvent(id);setView('stan');toast('Utworzono event.')}
+    try{const id=await store.createEvent({name,containers:Array.from({length:n},(_,i)=>({id:'c'+uid()+i,name:'Kontener '+(i+1),shop:''})),products:copy?{...copy.products}:{},links:copy?{...copy.links}:{},createdAt:Date.now()});evMenu=false;selectEvent(id);setView('stan');toast('Utworzono event „'+name+'”.')}
     catch{t.disabled=false;toast('Nie udało się utworzyć eventu.')}
     return;
   }
