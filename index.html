@@ -350,7 +350,9 @@ async function emailLogin(){
 }
 async function emailRegister(){
   const {email,pass}=authVals();authErr='';authMsgOk='';
-  if(pass.length<6){authErr='Hasło musi mieć co najmniej 6 znaków.';return renderAll()}
+  if(!email){authErr='Wpisz swój firmowy adres e-mail.';return renderAll()}
+  if(!pass){authErr='Wpisz hasło, które chcesz ustawić.';return renderAll()}
+  if(pass.length<6){authErr='Hasło jest za krótkie: ma '+pass.length+' zn., a musi mieć co najmniej 6.';return renderAll()}
   try{const c=await fb.auth.createUserWithEmailAndPassword(email,pass);fb.auth.languageCode='pl';await c.user.sendEmailVerification()}
   catch(e){authErr=authMsg(e);renderAll()}
 }
@@ -831,7 +833,7 @@ function renderGate(){
       ${authErr?`<div class="note err">${esc(authErr)}</div>`:''}${authMsgOk?`<div class="note ok">${esc(authMsgOk)}</div>`:''}
       <form id="authform" class="panel" style="padding:0;border:0" novalidate>
         <label class="f">Firmowy e-mail<input class="in" id="au-email" type="email" autocomplete="username" inputmode="email" placeholder="imie.nazwisko@topart.pl" value="${esc(keep.email)}"></label>
-        <label class="f">Hasło<input class="in" id="au-pass" type="password" autocomplete="current-password" placeholder="co najmniej 6 znaków"></label>
+        <label class="f">Hasło<input class="in" id="au-pass" type="password" autocomplete="current-password" placeholder="co najmniej 6 znaków" value="${esc(keep.pass)}"></label>
         <div class="btns"><button class="btn" type="submit">Zaloguj</button><button class="btn sec" type="button" data-register>Załóż konto</button><button class="btn ghost" type="button" data-reset>Nie pamiętam hasła</button></div>
       </form>
       <p class="small muted">Pierwszy raz? Wpisz firmowy e-mail, wymyśl hasło i kliknij „Załóż konto”. Na skrzynkę przyjdzie link potwierdzający.</p>
