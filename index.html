@@ -313,6 +313,7 @@ async function cloudInit(cfg){
   try{await auth.getRedirectResult()}catch(e){authErr=authMsg(e)}
   auth.onAuthStateChanged(u=>{
     user=u;
+    if(u&&!u.emailVerified&&u.providerData.some(p=>p.providerId==='password')){stopCloud();gate='verify';renderAll();return}
     if(u){gate=null;startCloud()}
     else{stopCloud();gate='login';renderAll()}
   });
@@ -321,8 +322,14 @@ function authMsg(e){
   const c=String(e?.code||e?.message||'');
   if(/popup-closed|cancelled-popup/.test(c)) return '';
   if(/unauthorized-domain/.test(c)) return 'Ten adres strony nie jest dodany w Firebase: Authentication → Settings → Authorized domains.';
-  if(/operation-not-allowed|admin-restricted/.test(c)) return 'Logowanie Google nie jest włączone w Firebase: Authentication → Sign-in method → Google.';
+  if(/operation-not-allowed|admin-restricted/.test(c)) return 'Ten sposób logowania nie jest włączony w Firebase: Authentication → Sign-in method (Google lub Email/Password).';
   if(/network-request-failed/.test(c)) return 'Brak internetu. Spróbuj ponownie, gdy wróci zasięg.';
+  if(/email-already-in-use/.test(c)) return 'Konto na ten adres już istnieje. Zaloguj się albo kliknij „Nie pamiętam hasła”.';
+  if(/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return 'Zły e-mail lub hasło.';
+  if(/weak-password/.test(c)) return 'Hasło musi mieć co najmniej 6 znaków.';
+  if(/invalid-email|missing-email/.test(c)) return 'Wpisz poprawny adres e-mail.';
+  if(/missing-password/.test(c)) return 'Wpisz hasło.';
+  if(/too-many-requests/.test(c)) return 'Za dużo prób. Odczekaj kilka minut i spróbuj ponownie.';
   if(/web-storage-unsupported|disallowed/.test(c)) return 'Ta przeglądarka blokuje logowanie. Otwórz link w Safari albo Chrome, a nie w Messengerze czy Instagramie.';
   return 'Nie udało się zalogować ('+c+').';
 }
@@ -334,6 +341,37 @@ async function login(){
     if(/popup-blocked|operation-not-supported/.test(String(e?.code))){try{await fb.auth.signInWithRedirect(prov);return}catch(e2){e=e2}}
     authErr=authMsg(e);renderAll();
   }
+}
+let authMsgOk='';
+const authVals=()=>({email:($('#au-email')?.value||'').trim(),pass:$('#au-pass')?.value||''});
+async function emailLogin(){
+  const {email,pass}=authVals();authErr='';authMsgOk='';
+  try{await fb.auth.signInWithEmailAndPassword(email,pass)}catch(e){authErr=authMsg(e);renderAll()}
+}
+async function emailRegister(){
+  const {email,pass}=authVals();authErr='';authMsgOk='';
+  if(pass.length<6){authErr='Hasło musi mieć co najmniej 6 znaków.';return renderAll()}
+  try{const c=await fb.auth.createUserWithEmailAndPassword(email,pass);fb.auth.languageCode='pl';await c.user.sendEmailVerification()}
+  catch(e){authErr=authMsg(e);renderAll()}
+}
+async function emailReset(){
+  const {email}=authVals();authErr='';authMsgOk='';
+  if(!email){authErr='Wpisz swój adres e-mail, a potem kliknij „Nie pamiętam hasła”.';return renderAll()}
+  try{fb.auth.languageCode='pl';await fb.auth.sendPasswordResetEmail(email);authMsgOk='Jeśli konto istnieje, na '+email+' przyszedł link do ustawienia nowego hasła. Sprawdź też spam.'}
+  catch(e){authErr=authMsg(e)}
+  renderAll();
+}
+async function verifyCheck(){
+  authErr='';
+  try{await user.reload();if(fb.auth.currentUser.emailVerified){await fb.auth.currentUser.getIdToken(true);user=fb.auth.currentUser;gate=null;startCloud();renderAll();return}
+    authErr='Adres nie jest jeszcze potwierdzony. Kliknij link w mailu i spróbuj ponownie.'}
+  catch(e){authErr=authMsg(e)}
+  renderAll();
+}
+async function verifyResend(){
+  try{fb.auth.languageCode='pl';await user.sendEmailVerification();authErr='';authMsgOk='Wysłano ponownie. Sprawdź skrzynkę i folder spam.'}
+  catch(e){authErr=authMsg(e);authMsgOk=''}
+  renderAll();
 }
 function makeCloudStore(){
   const {fs,FV}=fb,evs=fs.collection('events');
@@ -355,7 +393,7 @@ function startCloud(){
 function stopCloud(){unEvents?.();unOps?.();unAccess?.();unEvents=unOps=unAccess=null;opsFor=null;events=[];ops=[];store=null;draft=null}
 async function saveTeam(list){
   try{await fb.fs.doc('config/access').set({emails:list},{merge:true});return true}
-  catch(e){toast(String(e?.code).includes('permission')?'Listę zespołu może zmieniać tylko osoba wpisana jako właścicielka w regułach Firebase.':'Nie udało się zapisać listy.');return false}
+  catch(e){toast(String(e?.code).includes('permission')?'Listę zespołu zmieniają tylko admini wpisani w regułach Firebase.':'Nie udało się zapisać listy.');return false}
 }
 const RULES=owner=>`rules_version = '2';
 service cloud.firestore {
@@ -364,9 +402,13 @@ service cloud.firestore {
     function isOwner() {
       return request.auth != null && email() in ['${owner}'];
     }
+    function inDomain() {
+      return email().matches('.*@(topart[.]pl|qmk[.]pl)');
+    }
     function isMember() {
       return request.auth != null && request.auth.token.email_verified == true
-        && (isOwner() || email() in get(/databases/$(database)/documents/config/access).data.emails);
+        && (isOwner() || inDomain()
+            || email() in get(/databases/$(database)/documents/config/access).data.emails);
     }
     match /config/access {
       allow read: if isMember();
@@ -746,13 +788,13 @@ function renderEventSet(){
 function renderTeam(){
   const list=[...(access.emails||[])].sort();
   return `<div class="panel"><h2>Twoje konto</h2><p>Zalogowano jako <b>${esc(user?.email||'')}</b>.</p><div class="btns"><button class="btn sec sm" data-logout>Wyloguj</button></div></div>
-  <div class="panel"><h2>Zespół</h2><p class="small muted">Tylko osoby z tej listy (i właścicielka wpisana w regułach Firebase) widzą i zmieniają stany. Listę zmienia tylko właścicielka.</p>
+  <div class="panel"><h2>Zespół</h2><p class="small muted">Osoby z adresem @topart.pl i @qmk.pl mają dostęp automatycznie, po potwierdzeniu e-maila. Tutaj dopisujesz pozostałe adresy, np. Gmail. Listę zmieniają tylko admini wpisani w regułach Firebase.</p>
     ${list.length?`<div>${list.map(m=>`<div class="link"><div class="t"><b>${esc(m)}</b><button class="btn ghost" data-rmmember="${esc(m)}">Usuń</button></div></div>`).join('')}</div>`:'<p class="muted">Na liście nie ma jeszcze nikogo.</p>'}
     <div class="crow" style="grid-template-columns:1fr auto"><input class="in" id="newmember" type="email" inputmode="email" autocomplete="off" placeholder="adres@gmail.com" aria-label="Adres e-mail konta Google"><button class="btn sm" data-addmember>Dodaj</button></div>
     <p class="small muted">Wpisz adres konta Google, którym ta osoba loguje się na telefonie. Potem wyślij jej link do strony.</p></div>
   <div class="panel"><h3>Baza</h3><p class="small">Projekt Firebase <b>${esc(fb.project)}</b>. Bez internetu zmiany zapisują się w telefonie i wysyłają się po odzyskaniu zasięgu.</p>
     ${FIREBASE_CONFIG?'':`<h3>Link dla zespołu</h3><input class="in" id="teamlink" readonly value="${esc(teamLink(cfg))}"><div class="btns"><button class="btn sm" data-copylink>Kopiuj link</button><button class="btn ghost" data-disconnect>Odłącz to urządzenie od bazy</button></div>`}
-    <details><summary class="small muted" style="cursor:pointer">Reguły Firestore dla tego konta jako właścicielki</summary><pre style="margin-top:8px">${esc(RULES((user?.email||'').toLowerCase()))}</pre></details></div>`;
+    <details><summary class="small muted" style="cursor:pointer">Reguły Firestore z tym kontem jako adminem</summary><pre style="margin-top:8px">${esc(RULES((user?.email||'').toLowerCase()))}</pre></details></div>`;
 }
 function renderBaza(){
   return `<div class="panel"><h2>Wspólna baza dla zespołu</h2>
@@ -783,7 +825,24 @@ function renderGate(){
   document.querySelector('nav.tabs').hidden=on;$('#chips').hidden=on||!ev();
   if(!on) return false;
   if(gate==='checking') g.innerHTML=`<div class="empty"><p class="muted">Sprawdzam logowanie…</p></div>`;
-  if(gate==='login') g.innerHTML=`<div class="panel"><h2>Zaloguj się</h2><p>Stan kontenerów widzą tylko osoby z zespołu. Zaloguj się kontem Google, którego adres jest na liście.</p>${authErr?`<div class="note err">${esc(authErr)}</div>`:''}<div class="btns"><button class="btn" data-login>Zaloguj kontem Google</button></div><p class="small muted">Logujesz się raz na tym urządzeniu. Jeśli link otworzył się w Messengerze lub innej aplikacji, otwórz go w Safari albo Chrome.</p></div>`;
+  if(gate==='login'){
+    const keep=authVals();
+    g.innerHTML=`<div class="panel"><h2>Zaloguj się</h2><p>Stan kontenerów widzą tylko osoby z zespołu.</p>
+      ${authErr?`<div class="note err">${esc(authErr)}</div>`:''}${authMsgOk?`<div class="note ok">${esc(authMsgOk)}</div>`:''}
+      <form id="authform" class="panel" style="padding:0;border:0" novalidate>
+        <label class="f">Firmowy e-mail<input class="in" id="au-email" type="email" autocomplete="username" inputmode="email" placeholder="imie.nazwisko@topart.pl" value="${esc(keep.email)}"></label>
+        <label class="f">Hasło<input class="in" id="au-pass" type="password" autocomplete="current-password" placeholder="co najmniej 6 znaków"></label>
+        <div class="btns"><button class="btn" type="submit">Zaloguj</button><button class="btn sec" type="button" data-register>Załóż konto</button><button class="btn ghost" type="button" data-reset>Nie pamiętam hasła</button></div>
+      </form>
+      <p class="small muted">Pierwszy raz? Wpisz firmowy e-mail, wymyśl hasło i kliknij „Załóż konto”. Na skrzynkę przyjdzie link potwierdzający.</p>
+      <h3>Konto Google</h3>
+      <div class="btns"><button class="btn sec" data-login>Zaloguj kontem Google</button></div>
+      <p class="small muted">Jeśli link otworzył się w Messengerze lub innej aplikacji, otwórz go w Safari albo Chrome.</p></div>`;
+  }
+  if(gate==='verify') g.innerHTML=`<div class="panel"><h2>Potwierdź e-mail</h2><p>Na adres <b>${esc(user?.email||'')}</b> wysłaliśmy link potwierdzający. Otwórz maila, kliknij link, a potem wróć tutaj.</p>
+    <p class="small muted">Nie widzisz maila? Sprawdź folder Spam lub Kwarantanna w Outlooku. Nadawca to noreply@…firebaseapp.com.</p>
+    ${authErr?`<div class="note err">${esc(authErr)}</div>`:''}${authMsgOk?`<div class="note ok">${esc(authMsgOk)}</div>`:''}
+    <div class="btns"><button class="btn" data-verified>Potwierdzone, wchodzę</button><button class="btn sec" data-resend>Wyślij link ponownie</button><button class="btn ghost" data-logout>Wyloguj</button></div></div>`;
   if(gate==='denied') g.innerHTML=`<div class="panel"><h2>Brak dostępu</h2><p>Konto <b>${esc(user?.email||'')}</b> nie jest na liście zespołu.</p><p class="muted">Poproś osobę zarządzającą aplikacją o dopisanie tego adresu w Ustawienia → Zespół, a potem kliknij „Sprawdź ponownie”.</p><div class="btns"><button class="btn" data-recheck>Sprawdź ponownie</button><button class="btn sec" data-logout>Zaloguj innym kontem</button></div></div>`;
   return true;
 }
@@ -837,7 +896,11 @@ document.addEventListener('click',async e_=>{
     lsx.set('kontenery.cfg',JSON.stringify(c));location.reload();return;
   }
   if('login' in D) return login();
-  if('logout' in D){await fb.auth.signOut();return}
+  if('register' in D) return emailRegister();
+  if('reset' in D) return emailReset();
+  if('verified' in D) return verifyCheck();
+  if('resend' in D) return verifyResend();
+  if('logout' in D){authErr='';authMsgOk='';await fb.auth.signOut();return}
   if('recheck' in D){location.reload();return}
   if('addmember' in D){const v=$('#newmember').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){toast('Wpisz pełny adres e-mail.');return}const cur=access.emails||[];if(cur.includes(v)){toast('Ten adres już jest na liście.');return}if(await saveTeam([...cur,v]))toast('Dodano '+v+'.');return}
   if(D.rmmember){const cur=(access.emails||[]).filter(x=>x!==D.rmmember);if(await saveTeam(cur))toast('Usunięto '+D.rmmember+'.');return}
@@ -865,6 +928,7 @@ document.addEventListener('change',async e_=>{
   if(t.dataset.cname||t.dataset.cshop){const id=t.dataset.cname||t.dataset.cshop,f=t.dataset.cname?'name':'shop';const cs=conts().map(c=>c.id===id?{...c,[f]:f==='name'?(t.value.trim()||c.name):t.value.trim().toUpperCase()}:c);try{await store.updateEvent(evId,{containers:cs})}catch{}}
   if(t.dataset.pcat){await store.updateEvent(evId,{['products.'+t.dataset.pcat+'.cat']:t.value})}
 });
+document.addEventListener('submit',e_=>{if(e_.target.id==='authform'){e_.preventDefault();emailLogin()}});
 document.addEventListener('dragover',e_=>{const d=e_.target.closest?.('#drop');if(d){e_.preventDefault();d.classList.add('over')}});
 document.addEventListener('dragleave',e_=>{e_.target.closest?.('#drop')?.classList.remove('over')});
 document.addEventListener('drop',e_=>{const d=e_.target.closest?.('#drop');if(d){e_.preventDefault();d.classList.remove('over');handleFile(e_.dataTransfer.files[0])}});
