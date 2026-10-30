@@ -159,7 +159,7 @@ nav.tabs .dot{position:absolute;top:8px;left:calc(50% + 8px);width:8px;height:8p
 <body>
 <header>
   <div class="wrap gut">
-    <div class="top"><span class="mark" aria-hidden="true"></span><span class="evname" id="evname">Stan kontenerów</span><span class="conn" id="conn"></span></div>
+    <div class="top"><span class="mark" aria-hidden="true"></span><span class="evname" id="evname">Stan kontenerów</span><button class="conn" id="conn" data-acct type="button" style="background:none;font:inherit;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:inherit;cursor:pointer"></button></div>
     <div class="chips" id="chips" role="group" aria-label="Zakres"></div>
   </div>
 </header>
@@ -313,7 +313,7 @@ async function cloudInit(cfg){
   try{await auth.getRedirectResult()}catch(e){authErr=authMsg(e)}
   auth.onAuthStateChanged(u=>{
     user=u;
-    if(u&&!u.emailVerified&&u.providerData.some(p=>p.providerId==='password')){stopCloud();gate='verify';renderAll();return}
+    if(u&&!u.emailVerified&&(u.providerData||[]).some(p=>p.providerId==='password')){stopCloud();gate='verify';renderAll();return}
     if(u){gate=null;startCloud()}
     else{stopCloud();gate='login';renderAll()}
   });
@@ -387,22 +387,48 @@ function makeCloudStore(){
     async deleteEvent(id){await evs.doc(id).delete()}
   };
 }
+const ADMINS=['adamjaro12345@gmail.com','wiktoriawrembel@gmail.com'];
+let isAdmin=false,requests=[],unReqs=null,myReq,unMyReq=null;
 function startCloud(){
   stopCloud();store=makeCloudStore();storeErr='';
+  unReqs=fb.fs.collection('requests').onSnapshot(s=>{isAdmin=true;requests=s.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.status!=='rejected').sort((a,b)=>(a.at||0)-(b.at||0));rerenderAll()},()=>{isAdmin=false;requests=[]});
   unAccess=fb.fs.doc('config/access').onSnapshot(s=>{access=s.data()||{emails:[]};if(view==='ust')rerenderAll()},()=>{});
   subscribeEvents();
 }
-function stopCloud(){unEvents?.();unOps?.();unAccess?.();unEvents=unOps=unAccess=null;opsFor=null;events=[];ops=[];store=null;draft=null}
+function stopCloud(){unEvents?.();unOps?.();unAccess?.();unReqs?.();unMyReq?.();unEvents=unOps=unAccess=unReqs=unMyReq=null;isAdmin=false;requests=[];opsFor=null;events=[];ops=[];store=null;draft=null}
+function watchMyReq(){
+  if(!fb||!user) return;
+  unMyReq?.();myReq=undefined;let seen=false;
+  unMyReq=fb.fs.doc('requests/'+user.uid).onSnapshot(s=>{
+    if(s.exists){seen=true;myReq=s.data()}
+    else{
+      if(seen&&gate==='denied'){unMyReq?.();unMyReq=null;myReq=undefined;gate=null;startCloud();renderAll();return}
+      myReq=null;
+    }
+    renderAll();
+  },()=>{myReq=null;renderAll()});
+}
+async function requestAccess(){
+  try{await fb.fs.doc('requests/'+user.uid).set({email:(user.email||'').toLowerCase(),name:user.displayName||'',at:Date.now(),status:'pending'})}
+  catch(e){toast(String(e?.code).includes('permission')?'Nie udało się wysłać prośby. Najpierw potwierdź swój e-mail.':'Nie udało się wysłać prośby. Sprawdź internet.')}
+}
+async function decideRequest(id,ok){
+  const r=requests.find(x=>x.id===id);if(!r)return;
+  try{
+    if(ok){const cur=access.emails||[];if(!cur.includes(r.email)&&!(await saveTeam([...cur,r.email])))return;await fb.fs.doc('requests/'+id).delete();toast('Zaakceptowano '+r.email+'.')}
+    else{await fb.fs.doc('requests/'+id).update({status:'rejected'});toast('Odrzucono prośbę '+r.email+'.')}
+  }catch{toast('Nie udało się zapisać decyzji.')}
+}
 async function saveTeam(list){
   try{await fb.fs.doc('config/access').set({emails:list},{merge:true});return true}
   catch(e){toast(String(e?.code).includes('permission')?'Listę zespołu zmieniają tylko admini wpisani w regułach Firebase.':'Nie udało się zapisać listy.');return false}
 }
-const RULES=owner=>`rules_version = '2';
+const RULES=owners=>`rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function email() { return request.auth.token.email.lower(); }
     function isOwner() {
-      return request.auth != null && email() in ['${owner}'];
+      return request.auth != null && email() in [${owners.map(o=>"'"+o+"'").join(', ')}];
     }
     function inDomain() {
       return email().matches('.*@(topart[.]pl|qmk[.]pl)');
@@ -415,6 +441,15 @@ service cloud.firestore {
     match /config/access {
       allow read: if isMember();
       allow write: if isOwner();
+    }
+    match /requests/{uid} {
+      allow read: if isOwner() || (request.auth != null && request.auth.uid == uid);
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.auth.token.email_verified == true
+        && request.resource.data.email == email();
+      allow update: if isOwner() || (request.auth != null && request.auth.uid == uid
+        && request.resource.data.email == email() && request.resource.data.status == 'pending');
+      allow delete: if isOwner();
     }
     match /events/{doc=**} {
       allow read, write: if isMember();
@@ -516,7 +551,7 @@ function renderHeader(){
   $('#chips').innerHTML=e?[['all','Cały event'],...conts().map(x=>[x.id,x.name])].map(([id,n])=>`<button class="chip" data-scope="${esc(id)}" aria-pressed="${scope===id}">${esc(n)}</button>`).join(''):'';
   $('#chips').hidden=!e;
   $('#prodlist').innerHTML=Object.values(prods()).map(p=>`<option value="${esc(p.name)}">`).join('');
-  $('#ustdot').hidden=!e||!Object.keys(compute().unmapped).length;
+  $('#ustdot').hidden=!((e&&Object.keys(compute().unmapped).length)||(isAdmin&&requests.length));
 }
 function noEvent(){
   if(!store&&!storeErr) return `<div class="empty"><p class="muted">Łączę z bazą…</p></div>`;
@@ -728,9 +763,10 @@ function renderUst(){
   const el=$('#v-ust'),e=ev();
   const {unmapped,seen}=e?compute():{unmapped:{},seen:{}};
   const nUn=Object.keys(unmapped).length;
-  const tabs=[['powiazania','Powiązania',nUn],['produkty','Produkty'],['event','Event i kontenery'],[fb?'zespol':'baza',fb?'Zespół i konto':'Baza']];
+  const tabs=[['powiazania','Powiązania',nUn],['produkty','Produkty'],['event','Event i kontenery'],[fb?'zespol':'baza',fb?'Zespół i konto':'Baza',isAdmin?requests.length:0]];
   if(!e&&!['baza','zespol','event'].includes(ustTab)) ustTab='event';
-  let html=`<div class="subtabs">${tabs.map(([k,n,c])=>`<button data-ustab="${k}" aria-pressed="${ustTab===k}">${n}${c?`<span class="cnt">${c}</span>`:''}</button>`).join('')}</div>`;
+  let html=(fb&&user)?`<div class="kv" style="justify-content:space-between;align-items:center"><span>Zalogowano: <b>${esc(user.email||'')}</b></span><button class="btn sec sm" data-logout>Wyloguj</button></div>`:'';
+  html+=`<div class="subtabs">${tabs.map(([k,n,c])=>`<button data-ustab="${k}" aria-pressed="${ustTab===k}">${n}${c?`<span class="cnt">${c}</span>`:''}</button>`).join('')}</div>`;
   if(ustTab==='powiazania') html+=e?renderLinks(seen,unmapped):noEvent();
   if(ustTab==='produkty') html+=e?renderProds():noEvent();
   if(ustTab==='event') html+=renderEventSet();
@@ -789,14 +825,15 @@ function renderEventSet(){
 }
 function renderTeam(){
   const list=[...(access.emails||[])].sort();
-  return `<div class="panel"><h2>Twoje konto</h2><p>Zalogowano jako <b>${esc(user?.email||'')}</b>.</p><div class="btns"><button class="btn sec sm" data-logout>Wyloguj</button></div></div>
+  const reqs=isAdmin&&requests.length?`<div class="panel"><h2>Prośby o dostęp · ${requests.length}</h2>${requests.map(r=>`<div class="link"><div class="t"><b>${esc(r.email)}</b><span class="small muted">${esc(when(r.at))}</span></div>${r.name?`<div class="small muted">${esc(r.name)}</div>`:''}<div class="btns"><button class="btn sm" data-accept="${esc(r.id)}">Akceptuj</button><button class="btn sec sm" data-reject="${esc(r.id)}">Odrzuć</button></div></div>`).join('')}</div>`:'';
+  return reqs+`<div class="panel"><h2>Twoje konto</h2><p>Zalogowano jako <b>${esc(user?.email||'')}</b>.</p><div class="btns"><button class="btn sec sm" data-logout>Wyloguj</button></div></div>
   <div class="panel"><h2>Zespół</h2><p class="small muted">Osoby z adresem @topart.pl i @qmk.pl mają dostęp automatycznie, po potwierdzeniu e-maila. Tutaj dopisujesz pozostałe adresy, np. Gmail. Listę zmieniają tylko admini wpisani w regułach Firebase.</p>
-    ${list.length?`<div>${list.map(m=>`<div class="link"><div class="t"><b>${esc(m)}</b><button class="btn ghost" data-rmmember="${esc(m)}">Usuń</button></div></div>`).join('')}</div>`:'<p class="muted">Na liście nie ma jeszcze nikogo.</p>'}
-    <div class="crow" style="grid-template-columns:1fr auto"><input class="in" id="newmember" type="email" inputmode="email" autocomplete="off" placeholder="adres@gmail.com" aria-label="Adres e-mail konta Google"><button class="btn sm" data-addmember>Dodaj</button></div>
-    <p class="small muted">Wpisz adres konta Google, którym ta osoba loguje się na telefonie. Potem wyślij jej link do strony.</p></div>
+ ${list.length?`<div>${list.map(m=>`<div class="link"><div class="t"><b>${esc(m)}</b>${isAdmin?`<button class="btn ghost" data-rmmember="${esc(m)}">Usuń</button>`:''}</div></div>`).join('')}</div>`:'<p class="muted">Na liście nie ma jeszcze nikogo.</p>'}
+    ${isAdmin?'':'<!--'}<div class="crow" style="grid-template-columns:1fr auto"><input class="in" id="newmember" type="email" inputmode="email" autocomplete="off" placeholder="adres@gmail.com" aria-label="Adres e-mail konta Google"><button class="btn sm" data-addmember>Dodaj</button></div>
+    <p class="small muted">Wpisz adres, którym ta osoba loguje się w aplikacji. Możesz też poczekać, aż sama poprosi o dostęp.</p>${isAdmin?'':'-->'}</div>
   <div class="panel"><h3>Baza</h3><p class="small">Projekt Firebase <b>${esc(fb.project)}</b>. Bez internetu zmiany zapisują się w telefonie i wysyłają się po odzyskaniu zasięgu.</p>
     ${FIREBASE_CONFIG?'':`<h3>Link dla zespołu</h3><input class="in" id="teamlink" readonly value="${esc(teamLink(cfg))}"><div class="btns"><button class="btn sm" data-copylink>Kopiuj link</button><button class="btn ghost" data-disconnect>Odłącz to urządzenie od bazy</button></div>`}
-    <details><summary class="small muted" style="cursor:pointer">Reguły Firestore z tym kontem jako adminem</summary><pre style="margin-top:8px">${esc(RULES((user?.email||'').toLowerCase()))}</pre></details></div>`;
+    <details><summary class="small muted" style="cursor:pointer">Reguły Firestore z tym kontem jako adminem</summary><pre style="margin-top:8px">${esc(RULES(ADMINS))}</pre></details></div>`;
 }
 function renderBaza(){
   return `<div class="panel"><h2>Wspólna baza dla zespołu</h2>
@@ -805,7 +842,7 @@ function renderBaza(){
       <li>Na <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> utwórz projekt.</li>
       <li><b>Authentication → Sign-in method</b>: włącz <b>Google</b>.</li>
       <li><b>Firestore Database → Utwórz bazę</b>, lokalizacja w Europie, tryb produkcyjny.</li>
-      <li>W Firestore → <b>Reguły</b> wklej poniższe, zamień <code>TWOJ.ADRES@gmail.com</code> na swój adres Gmail (małymi literami) i kliknij <b>Opublikuj</b>:<pre>${esc(RULES('TWOJ.ADRES@gmail.com'))}</pre></li>
+      <li>W Firestore → <b>Reguły</b> wklej poniższe, zamień <code>TWOJ.ADRES@gmail.com</code> na swój adres Gmail (małymi literami) i kliknij <b>Opublikuj</b>:<pre>${esc(RULES(['TWOJ.ADRES@gmail.com']))}</pre></li>
       <li><b>Ustawienia projektu → Twoje aplikacje → &lt;/&gt;</b>: zarejestruj aplikację i skopiuj blok <code>const firebaseConfig = {…}</code>.</li>
       <li>Adres strony (np. <code>login.github.io</code>) dodaj w <b>Authentication → Settings → Authorized domains</b>.</li>
     </ol>
@@ -845,7 +882,14 @@ function renderGate(){
     <p class="small muted">Nie widzisz maila? Sprawdź folder Spam lub Kwarantanna w Outlooku. Nadawca to noreply@…firebaseapp.com.</p>
     ${authErr?`<div class="note err">${esc(authErr)}</div>`:''}${authMsgOk?`<div class="note ok">${esc(authMsgOk)}</div>`:''}
     <div class="btns"><button class="btn" data-verified>Potwierdzone, wchodzę</button><button class="btn sec" data-resend>Wyślij link ponownie</button><button class="btn ghost" data-logout>Wyloguj</button></div></div>`;
-  if(gate==='denied') g.innerHTML=`<div class="panel"><h2>Brak dostępu</h2><p>Konto <b>${esc(user?.email||'')}</b> nie jest na liście zespołu.</p><p class="muted">Poproś osobę zarządzającą aplikacją o dopisanie tego adresu w Ustawienia → Zespół, a potem kliknij „Sprawdź ponownie”.</p><div class="btns"><button class="btn" data-recheck>Sprawdź ponownie</button><button class="btn sec" data-logout>Zaloguj innym kontem</button></div></div>`;
+  if(gate==='denied'){
+    let body;
+    if(myReq===undefined) body=`<p class="muted">Sprawdzam…</p>`;
+    else if(myReq&&myReq.status==='pending') body=`<div class="note ok">Prośba o dostęp wysłana ${esc(when(myReq.at))}. Gdy admin ją zaakceptuje, aplikacja otworzy się tutaj sama.</div><div class="btns"><button class="btn sec" data-logout>Zaloguj innym kontem</button></div>`;
+    else if(myReq&&myReq.status==='rejected') body=`<div class="note err">Prośba o dostęp została odrzucona.</div><div class="btns"><button class="btn" data-reqaccess>Poproś ponownie</button><button class="btn sec" data-logout>Zaloguj innym kontem</button></div>`;
+    else body=`<p class="muted">Możesz poprosić o dostęp. Admin zobaczy prośbę w aplikacji i ją zaakceptuje.</p><div class="btns"><button class="btn" data-reqaccess>Poproś o dostęp</button><button class="btn sec" data-logout>Zaloguj innym kontem</button></div>`;
+    g.innerHTML=`<div class="panel"><h2>Brak dostępu</h2><p>Konto <b>${esc(user?.email||'')}</b> nie jest jeszcze w zespole.</p>${body}</div>`;
+  }
   return true;
 }
 function renderView(v){({stan:renderStan,dodaj:renderForm,hist:renderHist,ust:renderUst})[v]()}
@@ -897,7 +941,11 @@ document.addEventListener('click',async e_=>{
     if(!c){toast('Nie widzę apiKey, projectId i appId. Wklej cały blok firebaseConfig.');return}
     lsx.set('kontenery.cfg',JSON.stringify(c));location.reload();return;
   }
+  if('acct' in D){if(fb&&user){ustTab='zespol';setView('ust')}else if(!fb){ustTab='baza';setView('ust')}return}
   if('login' in D) return login();
+  if('reqaccess' in D) return requestAccess();
+  if(D.accept) return decideRequest(D.accept,true);
+  if(D.reject) return decideRequest(D.reject,false);
   if('register' in D) return emailRegister();
   if('reset' in D) return emailReset();
   if('verified' in D) return verifyCheck();
@@ -944,7 +992,7 @@ function subscribeEvents(){
     if(!events.some(e=>e.id===evId)) evId=events.length?events[events.length-1].id:null;
     if(opsFor!==evId) selectEvent(evId); else rerenderAll();
   },err=>{
-    if(String(err?.code).includes('permission')){gate='denied';stopCloud();renderAll();return}
+    if(String(err?.code).includes('permission')){gate='denied';stopCloud();watchMyReq();renderAll();return}
     storeErr='Błąd bazy: '+(err?.message||'');ustTab='baza';renderAll();
   });
 }
