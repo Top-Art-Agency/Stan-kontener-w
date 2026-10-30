@@ -164,6 +164,7 @@ nav.tabs .dot{position:absolute;top:8px;left:calc(50% + 8px);width:8px;height:8p
   </div>
 </header>
 <main><div class="wrap gut">
+  <section id="gate" hidden></section>
   <section id="v-stan"></section>
   <section id="v-dodaj" hidden></section>
   <section id="v-hist" hidden></section>
@@ -185,7 +186,14 @@ nav.tabs .dot{position:absolute;top:8px;left:calc(50% + 8px);width:8px;height:8p
    const FIREBASE_CONFIG = {apiKey:"...", authDomain:"...", projectId:"...", appId:"..."};
    Zostaw null, jeśli połączenie ustawiasz w aplikacji (Ustawienia → Baza).
    ====================================================================== */
-const FIREBASE_CONFIG = null;
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDU6Jc9Cmx0FNQxlbDv1j2ZlTpfn8dgD0Y",
+  authDomain: "stan-kontenerow-eee46.firebaseapp.com",
+  projectId: "stan-kontenerow-eee46",
+  storageBucket: "stan-kontenerow-eee46.firebasestorage.app",
+  messagingSenderId: "1027068374034",
+  appId: "1:1027068374034:web:803e5f63e80dc56f963ccb"
+};
 const FIREBASE_VER = "10.12.2";
 
 /* ======================================================================
@@ -291,17 +299,45 @@ function localStore(){
   };
 }
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('script'));document.head.appendChild(s)})}
-async function cloudStore(cfg){
+let fb=null,user=null,gate=null,authErr='',access={emails:[]},unAccess=null,unEvents=null;
+async function cloudInit(cfg){
   const base=`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/`;
   await loadScript(base+'firebase-app-compat.js');
   await Promise.all([loadScript(base+'firebase-auth-compat.js'),loadScript(base+'firebase-firestore-compat.js')]);
   const app=firebase.apps.length?firebase.app():firebase.initializeApp(cfg);
   const fs=app.firestore();
   try{await fs.enablePersistence({synchronizeTabs:true})}catch{}
-  await app.auth().signInAnonymously();
-  const FV=firebase.firestore.FieldValue;
-  const evs=fs.collection('events');
-  return {mode:'cloud',project:cfg.projectId,
+  const auth=app.auth();
+  fb={app,fs,auth,FV:firebase.firestore.FieldValue,project:cfg.projectId};
+  gate='checking';
+  try{await auth.getRedirectResult()}catch(e){authErr=authMsg(e)}
+  auth.onAuthStateChanged(u=>{
+    user=u;
+    if(u){gate=null;startCloud()}
+    else{stopCloud();gate='login';renderAll()}
+  });
+}
+function authMsg(e){
+  const c=String(e?.code||e?.message||'');
+  if(/popup-closed|cancelled-popup/.test(c)) return '';
+  if(/unauthorized-domain/.test(c)) return 'Ten adres strony nie jest dodany w Firebase: Authentication → Settings → Authorized domains.';
+  if(/operation-not-allowed|admin-restricted/.test(c)) return 'Logowanie Google nie jest włączone w Firebase: Authentication → Sign-in method → Google.';
+  if(/network-request-failed/.test(c)) return 'Brak internetu. Spróbuj ponownie, gdy wróci zasięg.';
+  if(/web-storage-unsupported|disallowed/.test(c)) return 'Ta przeglądarka blokuje logowanie. Otwórz link w Safari albo Chrome, a nie w Messengerze czy Instagramie.';
+  return 'Nie udało się zalogować ('+c+').';
+}
+async function login(){
+  authErr='';renderAll();
+  const prov=new firebase.auth.GoogleAuthProvider();prov.setCustomParameters({prompt:'select_account'});
+  try{await fb.auth.signInWithPopup(prov)}
+  catch(e){
+    if(/popup-blocked|operation-not-supported/.test(String(e?.code))){try{await fb.auth.signInWithRedirect(prov);return}catch(e2){e=e2}}
+    authErr=authMsg(e);renderAll();
+  }
+}
+function makeCloudStore(){
+  const {fs,FV}=fb,evs=fs.collection('events');
+  return {mode:'cloud',project:fb.project,
     subscribeEvents(cb,err){return evs.onSnapshot(s=>cb(s.docs.map(d=>({id:d.id,...d.data()}))),err)},
     async createEvent(d){return (await evs.add(d)).id},
     async updateEvent(id,patch){const p={};for(const [k,v] of Object.entries(patch))p[k]=v===null?FV.delete():v;await evs.doc(id).update(p)},
@@ -311,6 +347,36 @@ async function cloudStore(cfg){
     async deleteEvent(id){await evs.doc(id).delete()}
   };
 }
+function startCloud(){
+  stopCloud();store=makeCloudStore();storeErr='';
+  unAccess=fb.fs.doc('config/access').onSnapshot(s=>{access=s.data()||{emails:[]};if(view==='ust')rerenderAll()},()=>{});
+  subscribeEvents();
+}
+function stopCloud(){unEvents?.();unOps?.();unAccess?.();unEvents=unOps=unAccess=null;opsFor=null;events=[];ops=[];store=null;draft=null}
+async function saveTeam(list){
+  try{await fb.fs.doc('config/access').set({emails:list},{merge:true});return true}
+  catch(e){toast(String(e?.code).includes('permission')?'Listę zespołu może zmieniać tylko osoba wpisana jako właścicielka w regułach Firebase.':'Nie udało się zapisać listy.');return false}
+}
+const RULES=owner=>`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function email() { return request.auth.token.email.lower(); }
+    function isOwner() {
+      return request.auth != null && email() in ['${owner}'];
+    }
+    function isMember() {
+      return request.auth != null && request.auth.token.email_verified == true
+        && (isOwner() || email() in get(/databases/$(database)/documents/config/access).data.emails);
+    }
+    match /config/access {
+      allow read: if isMember();
+      allow write: if isOwner();
+    }
+    match /events/{doc=**} {
+      allow read, write: if isMember();
+    }
+  }
+}`;
 function parseConfig(txt){
   const cfg={};
   for(const k of ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId']){
@@ -400,8 +466,8 @@ function renderHeader(){
   const e=ev();
   $('#evname').textContent=e?e.name:'Stan kontenerów';
   const c=$('#conn');
-  c.textContent=!store?(storeErr?'Brak bazy':'Łączę…'):store.mode==='cloud'?'Wspólna baza':'Tylko to urządzenie';
-  c.className='conn'+(store?.mode==='cloud'?'':' off');
+  c.textContent=fb?(store?'Wspólna baza':'Nie zalogowano'):!store?'Łączę…':'Tylko to urządzenie';
+  c.className='conn'+(fb&&store?'':' off');
   if(scope!=='all'&&!conts().some(x=>x.id===scope)) scope='all';
   $('#chips').innerHTML=e?[['all','Cały event'],...conts().map(x=>[x.id,x.name])].map(([id,n])=>`<button class="chip" data-scope="${esc(id)}" aria-pressed="${scope===id}">${esc(n)}</button>`).join(''):'';
   $('#chips').hidden=!e;
@@ -618,13 +684,13 @@ function renderUst(){
   const el=$('#v-ust'),e=ev();
   const {unmapped,seen}=e?compute():{unmapped:{},seen:{}};
   const nUn=Object.keys(unmapped).length;
-  const tabs=[['powiazania','Powiązania',nUn],['produkty','Produkty'],['event','Event i kontenery'],['baza','Baza i zespół']];
-  if(!e&&ustTab!=='baza') ustTab='event';
+  const tabs=[['powiazania','Powiązania',nUn],['produkty','Produkty'],['event','Event i kontenery'],[fb?'zespol':'baza',fb?'Zespół i konto':'Baza']];
+  if(!e&&!['baza','zespol','event'].includes(ustTab)) ustTab='event';
   let html=`<div class="subtabs">${tabs.map(([k,n,c])=>`<button data-ustab="${k}" aria-pressed="${ustTab===k}">${n}${c?`<span class="cnt">${c}</span>`:''}</button>`).join('')}</div>`;
   if(ustTab==='powiazania') html+=e?renderLinks(seen,unmapped):noEvent();
   if(ustTab==='produkty') html+=e?renderProds():noEvent();
   if(ustTab==='event') html+=renderEventSet();
-  if(ustTab==='baza') html+=renderBaza();
+  if(ustTab==='baza'||ustTab==='zespol') html+=fb?renderTeam():renderBaza();
   el.innerHTML=html;
 }
 function renderLinks(seen,unmapped){
@@ -677,29 +743,27 @@ function renderEventSet(){
     <div class="btns"><button class="btn" data-newev>Utwórz event</button></div></div>`;
   return h;
 }
+function renderTeam(){
+  const list=[...(access.emails||[])].sort();
+  return `<div class="panel"><h2>Twoje konto</h2><p>Zalogowano jako <b>${esc(user?.email||'')}</b>.</p><div class="btns"><button class="btn sec sm" data-logout>Wyloguj</button></div></div>
+  <div class="panel"><h2>Zespół</h2><p class="small muted">Tylko osoby z tej listy (i właścicielka wpisana w regułach Firebase) widzą i zmieniają stany. Listę zmienia tylko właścicielka.</p>
+    ${list.length?`<div>${list.map(m=>`<div class="link"><div class="t"><b>${esc(m)}</b><button class="btn ghost" data-rmmember="${esc(m)}">Usuń</button></div></div>`).join('')}</div>`:'<p class="muted">Na liście nie ma jeszcze nikogo.</p>'}
+    <div class="crow" style="grid-template-columns:1fr auto"><input class="in" id="newmember" type="email" inputmode="email" autocomplete="off" placeholder="adres@gmail.com" aria-label="Adres e-mail konta Google"><button class="btn sm" data-addmember>Dodaj</button></div>
+    <p class="small muted">Wpisz adres konta Google, którym ta osoba loguje się na telefonie. Potem wyślij jej link do strony.</p></div>
+  <div class="panel"><h3>Baza</h3><p class="small">Projekt Firebase <b>${esc(fb.project)}</b>. Bez internetu zmiany zapisują się w telefonie i wysyłają się po odzyskaniu zasięgu.</p>
+    ${FIREBASE_CONFIG?'':`<h3>Link dla zespołu</h3><input class="in" id="teamlink" readonly value="${esc(teamLink(cfg))}"><div class="btns"><button class="btn sm" data-copylink>Kopiuj link</button><button class="btn ghost" data-disconnect>Odłącz to urządzenie od bazy</button></div>`}
+    <details><summary class="small muted" style="cursor:pointer">Reguły Firestore dla tego konta jako właścicielki</summary><pre style="margin-top:8px">${esc(RULES((user?.email||'').toLowerCase()))}</pre></details></div>`;
+}
 function renderBaza(){
-  const rules=`rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}`;
-  if(store?.mode==='cloud'){
-    return `<div class="panel"><h2>Wspólna baza</h2><p>Połączono z projektem <b>${esc(store.project)}</b>. Wszyscy z linkiem widzą te same dane na bieżąco. Bez internetu zmiany zapiszą się po odzyskaniu połączenia.</p>
-      ${FIREBASE_CONFIG?'<p class="small muted">Konfiguracja jest wbudowana w plik, więc wystarczy zwykły adres strony.</p>':`<h3>Link dla zespołu</h3><p class="small muted">Wyślij ten link osobom z ekipy. Po otwarciu połączą się z tą samą bazą.</p><input class="in" id="teamlink" readonly value="${esc(teamLink(cfg))}"><div class="btns"><button class="btn sm" data-copylink>Kopiuj link</button></div>`}
-      ${FIREBASE_CONFIG?'':'<div class="btns"><button class="btn ghost" data-disconnect>Odłącz to urządzenie od bazy</button></div>'}</div>`;
-  }
   return `<div class="panel"><h2>Wspólna baza dla zespołu</h2>
-    <p>${storeErr?`<span class="note err" style="display:block">${esc(storeErr)}</span>`:'Teraz dane zapisują się tylko na tym urządzeniu. Żeby cała ekipa widziała ten sam stan, podłącz darmową bazę Firebase (jednorazowo, ok. 10 minut).'}</p>
+    ${storeErr?`<div class="note err">${esc(storeErr)}</div>`:'<p>Teraz dane zapisują się tylko na tym urządzeniu. Żeby cała ekipa widziała ten sam stan, podłącz darmową bazę Firebase.</p>'}
     <ol class="steps">
-      <li>Wejdź na <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a>, zaloguj się kontem Google i kliknij <b>Utwórz projekt</b> (Google Analytics możesz wyłączyć).</li>
-      <li>W menu <b>Build → Authentication</b> kliknij <b>Rozpocznij</b>, potem w zakładce <b>Sign-in method</b> włącz <b>Anonimowe</b>.</li>
-      <li>W menu <b>Build → Firestore Database</b> kliknij <b>Utwórz bazę danych</b>, lokalizacja <b>eur3 (Europa)</b>, tryb produkcyjny.</li>
-      <li>W Firestore otwórz zakładkę <b>Reguły</b>, wklej poniższe i kliknij <b>Opublikuj</b>:<pre>${esc(rules)}</pre></li>
-      <li>Wejdź w <b>Ustawienia projektu</b> (zębatka) → <b>Twoje aplikacje</b> → ikona <b>&lt;/&gt;</b> (aplikacja internetowa), nadaj nazwę i zarejestruj. Skopiuj cały blok <code>const firebaseConfig = {…}</code>.</li>
-      <li>Jeśli strona stoi pod własnym adresem (np. Netlify), dodaj go w <b>Authentication → Settings → Authorized domains</b>.</li>
+      <li>Na <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> utwórz projekt.</li>
+      <li><b>Authentication → Sign-in method</b>: włącz <b>Google</b>.</li>
+      <li><b>Firestore Database → Utwórz bazę</b>, lokalizacja w Europie, tryb produkcyjny.</li>
+      <li>W Firestore → <b>Reguły</b> wklej poniższe, zamień <code>TWOJ.ADRES@gmail.com</code> na swój adres Gmail (małymi literami) i kliknij <b>Opublikuj</b>:<pre>${esc(RULES('TWOJ.ADRES@gmail.com'))}</pre></li>
+      <li><b>Ustawienia projektu → Twoje aplikacje → &lt;/&gt;</b>: zarejestruj aplikację i skopiuj blok <code>const firebaseConfig = {…}</code>.</li>
+      <li>Adres strony (np. <code>login.github.io</code>) dodaj w <b>Authentication → Settings → Authorized domains</b>.</li>
     </ol>
     <label class="f">Konfiguracja Firebase<textarea class="in" id="cfgtext" placeholder="const firebaseConfig = { apiKey: &quot;…&quot;, … };"></textarea></label>
     <div class="btns"><button class="btn" data-connect>Połącz</button></div></div>`;
@@ -713,9 +777,19 @@ function setView(v){
   document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.tab===v?'page':'false'));
   renderView(v);window.scrollTo(0,0);
 }
+function renderGate(){
+  const g=$('#gate'),on=!!gate;
+  g.hidden=!on;for(const s of ['stan','dodaj','hist','ust'])$('#v-'+s).hidden=on||s!==view;
+  document.querySelector('nav.tabs').hidden=on;$('#chips').hidden=on||!ev();
+  if(!on) return false;
+  if(gate==='checking') g.innerHTML=`<div class="empty"><p class="muted">Sprawdzam logowanie…</p></div>`;
+  if(gate==='login') g.innerHTML=`<div class="panel"><h2>Zaloguj się</h2><p>Stan kontenerów widzą tylko osoby z zespołu. Zaloguj się kontem Google, którego adres jest na liście.</p>${authErr?`<div class="note err">${esc(authErr)}</div>`:''}<div class="btns"><button class="btn" data-login>Zaloguj kontem Google</button></div><p class="small muted">Logujesz się raz na tym urządzeniu. Jeśli link otworzył się w Messengerze lub innej aplikacji, otwórz go w Safari albo Chrome.</p></div>`;
+  if(gate==='denied') g.innerHTML=`<div class="panel"><h2>Brak dostępu</h2><p>Konto <b>${esc(user?.email||'')}</b> nie jest na liście zespołu.</p><p class="muted">Poproś osobę zarządzającą aplikacją o dopisanie tego adresu w Ustawienia → Zespół, a potem kliknij „Sprawdź ponownie”.</p><div class="btns"><button class="btn" data-recheck>Sprawdź ponownie</button><button class="btn sec" data-logout>Zaloguj innym kontem</button></div></div>`;
+  return true;
+}
 function renderView(v){({stan:renderStan,dodaj:renderForm,hist:renderHist,ust:renderUst})[v]()}
-function renderAll(){renderHeader();if(view!=='dodaj'||!draft)renderView(view);else renderForm()}
-function rerenderAll(){renderHeader();const a=document.activeElement;if(view==='ust'&&a&&(a.dataset.cname||a.dataset.cshop||a.dataset.lp))return;renderView(view)}
+function renderAll(){renderHeader();if(renderGate())return;if(view!=='dodaj'||!draft)renderView(view);else renderForm()}
+function rerenderAll(){renderHeader();if(renderGate())return;const a=document.activeElement;if(view==='ust'&&a&&(a.dataset.cname||a.dataset.cshop||a.dataset.lp))return;renderView(view)}
 
 document.addEventListener('click',async e_=>{
   const t=e_.target.closest('button');if(!t)return;
@@ -762,6 +836,11 @@ document.addEventListener('click',async e_=>{
     if(!c){toast('Nie widzę apiKey, projectId i appId. Wklej cały blok firebaseConfig.');return}
     lsx.set('kontenery.cfg',JSON.stringify(c));location.reload();return;
   }
+  if('login' in D) return login();
+  if('logout' in D){await fb.auth.signOut();return}
+  if('recheck' in D){location.reload();return}
+  if('addmember' in D){const v=$('#newmember').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){toast('Wpisz pełny adres e-mail.');return}const cur=access.emails||[];if(cur.includes(v)){toast('Ten adres już jest na liście.');return}if(await saveTeam([...cur,v]))toast('Dodano '+v+'.');return}
+  if(D.rmmember){const cur=(access.emails||[]).filter(x=>x!==D.rmmember);if(await saveTeam(cur))toast('Usunięto '+D.rmmember+'.');return}
   if('disconnect' in D){lsx.del('kontenery.cfg');location.reload();return}
   if('copylink' in D){const inp=$('#teamlink');try{await navigator.clipboard.writeText(inp.value);toast('Skopiowano link.')}catch{inp.select();toast('Zaznaczono link, skopiuj go.')}return}
 });
@@ -793,6 +872,16 @@ document.addEventListener('drop',e_=>{const d=e_.target.closest?.('#drop');if(d)
 /* ======================================================================
    START
    ====================================================================== */
+function subscribeEvents(){
+  unEvents=store.subscribeEvents(list=>{
+    events=list.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+    if(!events.some(e=>e.id===evId)) evId=events.length?events[events.length-1].id:null;
+    if(opsFor!==evId) selectEvent(evId); else rerenderAll();
+  },err=>{
+    if(String(err?.code).includes('permission')){gate='denied';stopCloud();renderAll();return}
+    storeErr='Błąd bazy: '+(err?.message||'');ustTab='baza';renderAll();
+  });
+}
 function selectEvent(id){
   evId=id;if(id)lsx.set('kontenery.evId',id);
   if(opsFor!==id){unOps?.();unOps=null;ops=[];opsFor=id;draft=null;openLink=null;
@@ -805,19 +894,11 @@ function selectEvent(id){
   renderAll();
   cfg=readConfig();
   if(cfg){
-    try{store=await cloudStore(cfg)}
-    catch(err){
-      const code=String(err?.code||err?.message||'');
-      storeErr=code.includes('admin-restricted')||code.includes('operation-not-allowed')?'W Firebase nie jest włączone logowanie anonimowe (krok 2).':code.includes('unauthorized-domain')?'Ten adres strony nie jest dodany w Firebase (krok 6).':code==='script'?'Brak internetu albo zablokowane skrypty Firebase.':code.includes('api-key')?'Nieprawidłowa konfiguracja Firebase. Wklej ją jeszcze raz.':'Nie udało się połączyć z Firebase ('+code+').';
-      ustTab='baza';
-      store=localStore();
-    }
-  }else store=localStore();
-  store.subscribeEvents(list=>{
-    events=list.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
-    if(!events.some(e=>e.id===evId)) evId=events.length?events[events.length-1].id:null;
-    if(opsFor!==evId) selectEvent(evId); else rerenderAll();
-  },err=>{storeErr=String(err?.code).includes('permission')?'Baza odrzuca dostęp. Sprawdź reguły Firestore (krok 4).':'Błąd bazy: '+(err?.message||'');ustTab='baza';renderAll()});
+    try{await cloudInit(cfg);renderAll();return}
+    catch(err){storeErr=String(err?.message)==='script'?'Brak internetu albo zablokowane skrypty Firebase. Dane zapisują się tylko na tym urządzeniu.':'Nie udało się połączyć z Firebase. Sprawdź konfigurację.';ustTab='baza';gate=null}
+  }
+  store=localStore();
+  subscribeEvents();
 })();
 </script>
 </body>
