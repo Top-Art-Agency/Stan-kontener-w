@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14202b">
+<title>Stan Kontenerów</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Public+Sans:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<style>
+/* Układ: ciemny pasek z wyborem kontenera u góry, jedna kolumna kart, dolne zakładki jak w aplikacji na telefon */
+:root{
+  --bg:#e9edef; --surface:#ffffff; --sunk:#f3f5f6; --line:#d3dade; --fg:#14202b; --muted:#5a6a77;
+  --accent:#f2b705; --accent-ink:#14202b; --accent-soft:#fdf0c2;
+  --ok:#1f7a4d; --ok-soft:#dcf1e5; --warn:#a35f00; --warn-soft:#fdebd0; --crit:#c0352b; --crit-soft:#f9dedb;
+  --display:"Big Shoulders Display","Arial Narrow",Impact,sans-serif;
+  --body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --r:10px; color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0e151b; --surface:#16212a; --sunk:#111a21; --line:#273541; --fg:#e4eaee; --muted:#93a3af;
+  --accent:#f5c22b; --accent-ink:#14202b; --accent-soft:#3a3214;
+  --ok:#5cc58f; --ok-soft:#173326; --warn:#f0a94a; --warn-soft:#3a2a12; --crit:#f07a70; --crit-soft:#3d1c1a; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg)}
+body{color:var(--fg);font:15px/1.45 var(--body);padding-bottom:calc(76px + env(safe-area-inset-bottom,0px))}
+.gut{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:760px;margin:0 auto}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+header{position:sticky;top:0;z-index:5;background:#14202b;color:#e9edef;padding-top:env(safe-area-inset-top,0px)}
+header .wrap{padding-block:12px 10px;display:flex;flex-direction:column;gap:10px}
+.top{display:flex;align-items:center;gap:10px;min-width:0}
+.mark{width:30px;height:22px;flex:none;border-radius:3px;background:repeating-linear-gradient(90deg,#f2b705 0 4px,#c99700 4px 6px)}
+.evname{font:800 24px/1 var(--display);letter-spacing:.02em;text-transform:uppercase;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.conn{font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid currentColor;border-radius:99px;padding:2px 8px;opacity:.85;white-space:nowrap}
+.conn.off{color:#f0a94a}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid rgba(233,237,239,.35);background:transparent;color:#e9edef;border-radius:99px;padding:6px 12px;font-weight:600;font-size:13px;white-space:nowrap}
+.chip[aria-pressed="true"]{background:#f2b705;border-color:#f2b705;color:#14202b}
+
+main .wrap{padding-block:16px 24px;display:flex;flex-direction:column;gap:14px}
+section{display:flex;flex-direction:column;gap:14px}
+h2{font:800 22px/1.1 var(--display);text-transform:uppercase;letter-spacing:.03em;margin:0;text-wrap:balance}
+h3{font:700 12.5px/1.2 var(--body);text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0}
+p{margin:0}
+.muted{color:var(--muted)} .small{font-size:13px}
+ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+code{font-size:12.5px;background:var(--sunk);border:1px solid var(--line);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+pre{margin:0;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;overflow-x:auto}
+a{color:inherit}
+
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;min-width:0}
+.stat b{display:block;font:800 28px/1 var(--display)}
+.stat span{font-size:12px;color:var(--muted)}
+.stat.crit b{color:var(--crit)} .stat.warn b{color:var(--warn)}
+.reports{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px}
+.alert{background:var(--warn-soft);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:8px;font-size:14px}
+
+.search{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:11px 14px}
+.group{display:flex;flex-direction:column;gap:6px}
+.list{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.item{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:11px 14px;border-top:1px solid var(--line);align-items:center}
+.item:first-child{border-top:0}
+.item .nm{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.item .rem{font:800 30px/1 var(--display);text-align:right;grid-row:span 2}
+.item .meta{font-size:12.5px;color:var(--muted);min-width:0}
+.item .bar{grid-column:1/-1;height:4px;border-radius:2px;background:var(--sunk);overflow:hidden;margin-top:6px}
+.item .bar i{display:block;height:100%;background:var(--ok)}
+.item.warn .bar i{background:var(--warn)} .item.warn .rem{color:var(--warn)}
+.item.crit .bar i{background:var(--crit)} .item.crit .rem{color:var(--crit)}
+.per{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.per span{font-size:12px;background:var(--sunk);border-radius:4px;padding:2px 7px}
+.per span.neg{background:var(--crit-soft);color:var(--crit)}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:22px 18px;display:flex;flex-direction:column;gap:10px}
+
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.act{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.act b{font:800 18px/1.1 var(--display);text-transform:uppercase;letter-spacing:.02em}
+.act span{font-size:12.5px;color:var(--muted)}
+.act[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+.tag{align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:4px;padding:2px 6px;white-space:nowrap}
+.t-order{background:var(--ok-soft);color:var(--ok)} .t-manual{background:var(--accent-soft);color:var(--fg)}
+.t-sale{background:var(--crit-soft);color:var(--crit)} .t-transfer{background:var(--sunk);color:var(--muted);border:1px solid var(--line)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label.f,.f{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600;min-width:0}
+.in{width:100%;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0}
+textarea.in{min-height:110px;resize:vertical;font-size:13px}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{flex:1;background:var(--sunk);border:0;padding:9px 6px;font-size:13px;font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:18px;text-align:center;background:var(--sunk);display:flex;flex-direction:column;gap:6px;align-items:center}
+.drop.over{border-color:var(--accent)}
+.btn{border:0;border-radius:8px;padding:11px 16px;font-weight:700;background:var(--accent);color:var(--accent-ink)}
+.btn.sec{background:var(--sunk);color:var(--fg);border:1px solid var(--line)}
+.btn.ghost{background:transparent;color:var(--muted);padding:6px 8px;font-weight:600}
+.btn.danger{background:var(--crit);color:#fff}
+.btn.sm{padding:7px 11px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+.btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.note{font-size:13.5px;border-radius:8px;padding:9px 12px;background:var(--sunk)}
+.note.err{background:var(--crit-soft);color:var(--crit)} .note.ok{background:var(--ok-soft);color:var(--ok)} .note.info{background:var(--accent-soft);color:var(--fg)}
+.kv{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;color:var(--muted)} .kv b{color:var(--fg)}
+
+.rows{display:flex;flex-direction:column}
+.prow{display:grid;grid-template-columns:1fr 84px 30px;gap:4px 8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow .nm{min-width:0;overflow-wrap:anywhere;font-size:14px}
+.prow .sub{grid-column:1/-1;font-size:12px;color:var(--muted);margin-top:-2px}
+.prow .sub.w{color:var(--warn);font-weight:600} .prow .sub.s{font-style:italic}
+.prow .x{border:0;background:transparent;color:var(--muted);font-size:20px;line-height:1;padding:6px 0}
+.mrow{display:grid;grid-template-columns:1fr 84px 30px;gap:6px;align-items:center}
+.mrow .cat{grid-column:1/2}
+
+.op{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.op .h{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.op .when{margin-left:auto;font-size:12.5px;color:var(--muted)}
+.op details summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.op ul{margin:6px 0 0;padding:0;list-style:none;font-size:13.5px}
+.op li{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px dotted var(--line)}
+.op.off{opacity:.55}
+
+.link{border-top:1px solid var(--line);padding:12px 0;display:flex;flex-direction:column;gap:8px}
+.link:first-of-type{border-top:0}
+.link .t{display:flex;gap:8px;align-items:baseline;justify-content:space-between;flex-wrap:wrap}
+.link .t b{font-size:14px;min-width:0;overflow-wrap:anywhere}
+.link .st{font-size:12.5px}
+.link .st.w{color:var(--warn);font-weight:600}
+.subtabs{display:flex;gap:6px;flex-wrap:wrap}
+.subtabs button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 13px;font-size:13px;font-weight:600}
+.subtabs button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.subtabs button .cnt{background:var(--warn);color:#fff;border-radius:99px;padding:0 6px;margin-left:5px;font-size:11px}
+.crow{display:grid;grid-template-columns:1fr 110px;gap:8px}
+.evbtn{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;text-align:left;width:100%}
+.evbtn[aria-current="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabs .wrap{display:grid;grid-template-columns:repeat(4,1fr)}
+nav.tabs button{background:none;border:0;padding:10px 4px 12px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:12px;font-weight:600;color:var(--muted);position:relative}
+nav.tabs svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav.tabs button[aria-current="page"]{color:var(--fg)}
+nav.tabs button[aria-current="page"]::before{content:"";position:absolute;top:0;width:28px;height:3px;border-radius:2px;background:var(--accent)}
+nav.tabs .dot{position:absolute;top:8px;left:calc(50% + 8px);width:8px;height:8px;border-radius:50%;background:var(--warn)}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:#14202b;color:#e9edef;padding:10px 16px;border-radius:8px;font-size:14px;z-index:9;max-width:calc(100% - 32px)}
+@media (max-width:420px){.stat b{font-size:24px}.row2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap gut">
+    <div class="top"><span class="mark" aria-hidden="true"></span><span class="evname" id="evname">Stan kontenerów</span><span class="conn" id="conn"></span></div>
+    <div class="chips" id="chips" role="group" aria-label="Zakres"></div>
+  </div>
+</header>
+<main><div class="wrap gut">
+  <section id="v-stan"></section>
+  <section id="v-dodaj" hidden></section>
+  <section id="v-hist" hidden></section>
+  <section id="v-ust" hidden></section>
+</div></main>
+<datalist id="prodlist"></datalist>
+<div id="toast" hidden></div>
+<nav class="tabs" aria-label="Widoki"><div class="wrap">
+  <button data-tab="stan" aria-current="page"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="12" rx="1"/><path d="M7 7v12M11 7v12M15 7v12M3 7l3-3h12l3 3"/></svg>Stan</button>
+  <button data-tab="dodaj"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Dodaj</button>
+  <button data-tab="hist"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Historia</button>
+  <button data-tab="ust"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Ustawienia<i class="dot" id="ustdot" hidden></i></button>
+</div></nav>
+
+<script>
+/* ======================================================================
+   KONFIGURACJA BAZY
+   Wklej tu konfigurację Firebase, żeby była wbudowana w plik, np.:
+   const FIREBASE_CONFIG = {apiKey:"...", authDomain:"...", projectId:"...", appId:"..."};
+   Zostaw null, jeśli połączenie ustawiasz w aplikacji (Ustawienia → Baza).
+   ====================================================================== */
+const FIREBASE_CONFIG = null;
+const FIREBASE_VER = "10.12.2";
+
+/* ======================================================================
+   CZYTNIK DOKUMENTÓW (bez AI)
+   ====================================================================== */
+// <parser>
+const IDX=/^\d{7,9}$/, NUM=/^-?\d+(?:[.,]\d+)?$/;
+function toNum(s){return parseFloat(String(s).replace(/\s/g,'').replace(',','.'))}
+function textToRows(text){return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(l=>l.split(/\s{2,}|\t/).map(s=>s.trim()).filter(Boolean))}
+function detectKind(rows){
+  const all=rows.map(r=>r.join(' ')).join('\n');
+  if(/Szczegóły sprzedaży|sprzedaży towarów/i.test(all)) return 'sale';
+  if(/zamówieni/i.test(all)&&/Indeks/i.test(all)) return 'order';
+  return null;
+}
+function parseOrder(rows){
+  const all=rows.map(r=>r.join(' ')).join('\n');
+  const doc=(all.match(/\b(Z\d{4}\d{5,}[A-Z0-9]*)\b/)||[])[1]||'';
+  const shop=(all.match(/\b(Z\d{4})\b(?!\d)/g)||[]).find(s=>s!==doc)||(doc?doc.slice(0,5):'');
+  const dm=all.match(/Dostawa[\s\S]{0,40}?(\d{2})\.(\d{2})\.(\d{4})/);
+  const items=[];
+  for(const r0 of rows){
+    let r=r0.flatMap(c=>c.match(/^(\d+)\.\s+(\d{7,9})\s+(.+)$/)?c.match(/^(\d+)\.\s+(\d{7,9})\s+(.+)$/).slice(1):[c]);
+    const i=r.findIndex(c=>IDX.test(c));
+    if(i<0||!/^\d+\.?$/.test(r[i-1]||'')) continue;
+    let rest=r.slice(i+1), qty=null, unit='szt.', qi=-1;
+    for(let j=rest.length-1;j>0;j--){
+      const m=rest[j].match(/^(-?\d+(?:[.,]\d+)?)\s*(szt\.?|kg|op\.?|l|kpl\.?)$/i);
+      if(m){qty=toNum(m[1]);unit=m[2];qi=j;break}
+      if(/^(szt\.?|kg|op\.?|l|kpl\.?)$/i.test(rest[j])&&NUM.test(rest[j-1])){qty=toNum(rest[j-1]);unit=rest[j];qi=j-1;break}
+    }
+    if(qty===null||qi<1) continue;
+    const name=rest[0], sub=rest.slice(1,qi).join(' ');
+    items.push({i:r[i],name,sub,q:qty,unit});
+  }
+  return {kind:'order',doc,shop,date:dm?`${dm[3]}-${dm[2]}-${dm[1]}`:'',items};
+}
+function parseSale(rows){
+  const all=rows.map(r=>r.join(' ')).join('\n');
+  const pm=all.match(/okresie\s+(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s*-\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?/i);
+  const shop=(rows.find(r=>r.length===1&&/^Z\d{4}$/.test(r[0]))||[])[0]||((all.match(/\b(Z\d{4})\b/)||[])[1]||'');
+  const items=[];
+  for(const r0 of rows){
+    const r=r0.flatMap(c=>c.split(/\s+(?=\d{7,9}$)/));
+    let i=-1; for(let j=r.length-1;j>=0;j--) if(IDX.test(r[j])){i=j;break}
+    if(i<1) continue;
+    let after=r.slice(i+1); if(after[0]&&/^[A-Z]{1,2}$/.test(after[0])) after=after.slice(1);
+    if(!after.length||!NUM.test(after[0])) continue;
+    let name=r.slice(0,i).join(' ').replace(/^\d+\s+/,'').trim();
+    if(/^\d+$/.test(r[0])&&i===1) continue;
+    if(!name) continue;
+    items.push({i:r[i],name,q:toNum(after[0])});
+  }
+  return {kind:'sale',shop,from:pm?pm[1]+(pm[2]?' '+pm[2]:''):'',to:pm?pm[3]+(pm[4]?' '+pm[4]:''):'',items};
+}
+function parseRows(rows){
+  const k=detectKind(rows);
+  if(k==='order') return parseOrder(rows);
+  if(k==='sale') return parseSale(rows);
+  const s=parseSale(rows),o=parseOrder(rows);
+  return o.items.length>=s.items.length?o:s;
+}
+const DEPOSIT=/BUTELKA PLASTIKOWA|PUSZKA ZWR|KAUCJ|OPAKOWANIE ZWR|SKRZYNKA ZWR/i;
+const STOP=new Set('zk zc zgx gx mw sk new na do z ze i cieplo ciep cie chlodz chlodzony ase nf vw zabka cafe max'.split(' '));
+function tokens(s){return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l').replace(/(\d)\s+(ml|g|l|kg)\b/g,'$1$2').split(/[^a-z0-9,]+/).filter(t=>t&&!STOP.has(t))}
+function similarity(a,b){const A=tokens(a),B=new Set(tokens(b));if(!A.length)return 0;return A.filter(t=>B.has(t)).length/Math.max(A.length,B.size)}
+function guessCat(name,sub){
+  const n=(name+' '+(sub||'')).toLowerCase();
+  if(/kubek|wieczk|pude[lł]k|torebk|tack|serwet|s[lł]omk|sztu[cć]|widel|[lł]y[zż]k|pojemnik|reklam[oó]wk|folia|r[eę]kawic/.test(n)) return 'opakowania';
+  if(/napoj|nap[oó]j|woda|lemoniad|kawa|herbat|sok|cola|pepsi|red bull|ice tea|piwo|mleko/.test(n)) return 'napoje';
+  if(/eksploatac/.test(n)) return 'opakowania';
+  if(/fast food|mro[zż]onk|pizza|panini|hot ?dog|nachos|kanapk|bu[lł]k|zapiekank|frytk/.test(n)) return 'jedzenie';
+  return 'inne';
+}
+function prettyName(s){return /[a-ząćęłńóśźż]/.test(s)?s:s.toLowerCase().replace(/(^|\s|-)(\p{L})/gu,(m,a,b)=>a+b.toUpperCase()).replace(/\b(\d+)(Ml|G|L|Kg)\b/g,(m,a,b)=>a+b.toLowerCase())}
+// </parser>
+
+/* ======================================================================
+   MAGAZYN DANYCH: Firebase (wspólny) albo lokalny (to urządzenie)
+   ====================================================================== */
+const lsx={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}},del(k){try{localStorage.removeItem(k)}catch{}}};
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+function setPath(obj,path,val){const ks=path.split('.');let o=obj;for(let i=0;i<ks.length-1;i++){o=o[ks[i]]=(o[ks[i]]&&typeof o[ks[i]]==='object')?o[ks[i]]:{}}if(val===null)delete o[ks.at(-1)];else o[ks.at(-1)]=val}
+
+function localStore(){
+  const K='kontenery.local.v1';
+  let data;try{data=JSON.parse(lsx.get(K))}catch{} if(!data) data={events:{},ops:{}};
+  const evSubs=new Set(),opSubs={};
+  const save=()=>lsx.set(K,JSON.stringify(data));
+  const evList=()=>Object.entries(data.events).map(([id,d])=>({id,...d}));
+  const emitEv=()=>evSubs.forEach(f=>f(evList()));
+  const opList=e=>Object.entries(data.ops[e]||{}).map(([id,d])=>({id,...d}));
+  const emitOps=e=>(opSubs[e]||new Set()).forEach(f=>f(opList(e)));
+  return {mode:'local',
+    subscribeEvents(cb){evSubs.add(cb);setTimeout(()=>cb(evList()));return()=>evSubs.delete(cb)},
+    async createEvent(d){const id=uid();data.events[id]=d;save();emitEv();return id},
+    async updateEvent(id,patch){const e=data.events[id];for(const [k,v] of Object.entries(patch))setPath(e,k,v);save();emitEv()},
+    subscribeOps(e,cb){(opSubs[e]||(opSubs[e]=new Set())).add(cb);setTimeout(()=>cb(opList(e)));return()=>opSubs[e].delete(cb)},
+    async addOp(e,op){(data.ops[e]||(data.ops[e]={}))[uid()]=op;save();emitOps(e)},
+    async deleteOp(e,id){delete data.ops[e]?.[id];save();emitOps(e)},
+    async deleteEvent(id){delete data.events[id];delete data.ops[id];save();emitEv()},
+    dump(){return data}
+  };
+}
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('script'));document.head.appendChild(s)})}
+async function cloudStore(cfg){
+  const base=`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/`;
+  await loadScript(base+'firebase-app-compat.js');
+  await Promise.all([loadScript(base+'firebase-auth-compat.js'),loadScript(base+'firebase-firestore-compat.js')]);
+  const app=firebase.apps.length?firebase.app():firebase.initializeApp(cfg);
+  const fs=app.firestore();
+  try{await fs.enablePersistence({synchronizeTabs:true})}catch{}
+  await app.auth().signInAnonymously();
+  const FV=firebase.firestore.FieldValue;
+  const evs=fs.collection('events');
+  return {mode:'cloud',project:cfg.projectId,
+    subscribeEvents(cb,err){return evs.onSnapshot(s=>cb(s.docs.map(d=>({id:d.id,...d.data()}))),err)},
+    async createEvent(d){return (await evs.add(d)).id},
+    async updateEvent(id,patch){const p={};for(const [k,v] of Object.entries(patch))p[k]=v===null?FV.delete():v;await evs.doc(id).update(p)},
+    subscribeOps(e,cb,err){return evs.doc(e).collection('ops').onSnapshot(s=>cb(s.docs.map(d=>({id:d.id,...d.data()}))),err)},
+    async addOp(e,op){await evs.doc(e).collection('ops').add(op)},
+    async deleteOp(e,id){await evs.doc(e).collection('ops').doc(id).delete()},
+    async deleteEvent(id){await evs.doc(id).delete()}
+  };
+}
+function parseConfig(txt){
+  const cfg={};
+  for(const k of ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId']){
+    const m=String(txt).match(new RegExp('["\']?'+k+'["\']?\\s*:\\s*["\']([^"\']+)["\']'));
+    if(m) cfg[k]=m[1];
+  }
+  return cfg.apiKey&&cfg.projectId&&cfg.appId?cfg:null;
+}
+function readConfig(){
+  const h=location.hash.match(/cfg=([A-Za-z0-9+/=_-]+)/);
+  if(h){try{const c=JSON.parse(atob(h[1].replace(/-/g,'+').replace(/_/g,'/')));if(c.apiKey){lsx.set('kontenery.cfg',JSON.stringify(c))}}catch{}history.replaceState(null,'',location.pathname+location.search)}
+  if(FIREBASE_CONFIG) return FIREBASE_CONFIG;
+  try{return JSON.parse(lsx.get('kontenery.cfg'))}catch{return null}
+}
+const teamLink=cfg=>location.origin+location.pathname+'#cfg='+btoa(JSON.stringify(cfg)).replace(/\+/g,'-').replace(/\//g,'_');
+
+/* ======================================================================
+   STAN APLIKACJI
+   ====================================================================== */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const CATS={jedzenie:'Jedzenie',napoje:'Napoje',opakowania:'Opakowania',inne:'Inne'};
+const TYPES={order:['Zamówienie','t-order'],manual:['Domówienie','t-manual'],sale:['Sprzedaż','t-sale'],transfer:['Przerzut','t-transfer']};
+const fmt=n=>{n=Math.round(n*100)/100;return String(n).replace('.',',')};
+const when=t=>new Date(t).toLocaleString('pl-PL',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+const slug=s=>'m_'+String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l').replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,60);
+
+let store=null,storeErr='',cfg=null;
+let events=[],evId=lsx.get('kontenery.evId'),ops=[],opsFor=null,unOps=null;
+let view='stan',scope=lsx.get('kontenery.scope')||'all',query='',draft=null,pendingDel=null,ustTab='powiazania',openLink=null,linkEdit=null,confirmEv=false;
+
+const ev=()=>events.find(e=>e.id===evId)||null;
+const conts=()=>ev()?.containers||[];
+const cname=id=>conts().find(c=>c.id===id)?.name||'?';
+const prods=()=>ev()?.products||{};
+const links=()=>ev()?.links||{};
+const pname=k=>prods()[k]?.name||k;
+const pcat=k=>prods()[k]?.cat||'inne';
+function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200)}
+
+/* Jak sprzedana pozycja zdejmuje towar ze stanu */
+function resolve(i,name){
+  const L=links()[i];
+  if(L?.skip) return {skip:true};
+  if(L?.parts?.length) return {parts:L.parts};
+  if(prods()[i]) return {parts:[{k:i,q:1}],auto:true};
+  if(DEPOSIT.test(name||'')) return {skip:true,auto:true};
+  return null;
+}
+function suggest(i,name){
+  let best=null,score=0;
+  for(const [k,p] of Object.entries(prods())){const s=similarity(name,p.name);if(s>score){score=s;best=k}}
+  return score>=.6?best:null;
+}
+function activeSales(){
+  const latest={};
+  for(const o of ops) if(o.type==='sale'&&o.mode==='cum'){const key=o.container+'|'+(o.from||'');const cur=latest[key];if(!cur||(o.to||'')>(cur.to||'')||((o.to||'')===(cur.to||'')&&o.at>cur.at))latest[key]=o}
+  return o=>o.type!=='sale'||o.mode!=='cum'||latest[o.container+'|'+(o.from||'')]===o;
+}
+function compute(){
+  const m={},unmapped={},seen={},isAct=activeSales();
+  const row=k=>m[k]||(m[k]={k,inn:0,out:0,tin:0,tout:0,per:{}});
+  const add=(k,c,f,q)=>{const r=row(k);(r.per[c]||(r.per[c]={inn:0,out:0,tin:0,tout:0}))[f]+=q;r[f]+=q};
+  for(const o of ops){
+    if(o.type==='order'||o.type==='manual') for(const it of o.items||[]) add(it.k,o.container,'inn',+it.q||0);
+    else if(o.type==='transfer') for(const it of o.items||[]){add(it.k,o.from,'tout',+it.q||0);add(it.k,o.to,'tin',+it.q||0)}
+    else if(o.type==='sale'){
+      const act=isAct(o);
+      for(const it of o.items||[]){
+        const s=seen[it.i]||(seen[it.i]={i:it.i,name:it.n,q:0});if(act)s.q+=+it.q||0;
+        if(!act) continue;
+        const r=resolve(it.i,it.n);
+        if(!r){const u=unmapped[it.i]||(unmapped[it.i]={i:it.i,name:it.n,q:0});u.q+=+it.q||0;continue}
+        if(r.skip) continue;
+        for(const p of r.parts) add(p.k,o.container,'out',(+it.q||0)*(+p.q||0));
+      }
+    }
+  }
+  return {m,unmapped,seen,isAct};
+}
+const remOf=x=>x.inn-x.out+x.tin-x.tout;
+
+/* ======================================================================
+   WIDOKI
+   ====================================================================== */
+function renderHeader(){
+  const e=ev();
+  $('#evname').textContent=e?e.name:'Stan kontenerów';
+  const c=$('#conn');
+  c.textContent=!store?(storeErr?'Brak bazy':'Łączę…'):store.mode==='cloud'?'Wspólna baza':'Tylko to urządzenie';
+  c.className='conn'+(store?.mode==='cloud'?'':' off');
+  if(scope!=='all'&&!conts().some(x=>x.id===scope)) scope='all';
+  $('#chips').innerHTML=e?[['all','Cały event'],...conts().map(x=>[x.id,x.name])].map(([id,n])=>`<button class="chip" data-scope="${esc(id)}" aria-pressed="${scope===id}">${esc(n)}</button>`).join(''):'';
+  $('#chips').hidden=!e;
+  $('#prodlist').innerHTML=Object.values(prods()).map(p=>`<option value="${esc(p.name)}">`).join('');
+  $('#ustdot').hidden=!e||!Object.keys(compute().unmapped).length;
+}
+function noEvent(){
+  if(!store&&!storeErr) return `<div class="empty"><p class="muted">Łączę z bazą…</p></div>`;
+  if(storeErr) return `<div class="empty"><h2>Nie udało się połączyć z bazą</h2><p class="muted">${esc(storeErr)}</p><div class="btns"><button class="btn" data-go="ust" data-ust="baza">Sprawdź połączenie</button></div></div>`;
+  return `<div class="empty"><h2>Zacznij od eventu</h2><p class="muted">Utwórz event i podaj, ile masz kontenerów.</p><div class="btns"><button class="btn" data-go="ust" data-ust="event">Utwórz event</button></div></div>`;
+}
+
+function renderStan(){
+  const el=$('#v-stan'),e=ev();
+  if(!e){el.innerHTML=noEvent();return}
+  const {m,unmapped}=compute();
+  const rows=Object.values(m).map(r=>{const x=scope==='all'?r:(r.per[scope]||{inn:0,out:0,tin:0,tout:0});return {...r,x,rem:remOf(x),supply:x.inn+x.tin}}).filter(r=>r.supply||r.x.out||r.x.tout);
+  const lvl=r=>r.rem<=0?'crit':(r.supply&&r.rem/r.supply<.15?'warn':'');
+  const nCrit=rows.filter(r=>lvl(r)==='crit').length,nWarn=rows.filter(r=>lvl(r)==='warn').length;
+  const lastRep=conts().filter(c=>scope==='all'||c.id===scope).map(c=>{const s=ops.filter(o=>o.type==='sale'&&o.container===c.id).sort((a,b)=>b.at-a.at)[0];return `<span>${esc(c.name)}: ${s?'sprzedaż do '+esc(s.to||when(s.at)):'brak raportu sprzedaży'}</span>`}).join('');
+  const un=Object.values(unmapped);
+  let html=`<div class="summary">
+    <div class="stat"><b class="num">${rows.length}</b><span>produktów</span></div>
+    <div class="stat warn"><b class="num">${nWarn}</b><span>kończy się</span></div>
+    <div class="stat crit"><b class="num">${nCrit}</b><span>brak lub minus</span></div></div>
+  <div class="reports">${lastRep}</div>`;
+  if(un.length) html+=`<div class="alert"><b>${un.length} ${un.length===1?'sprzedana pozycja nie jest':'sprzedanych pozycji nie jest'} powiązanych ze stanem</b><span class="small">Np. ${esc(un.slice(0,3).map(u=>prettyName(u.name)).join(', '))}. Wskaż, z którego produktu schodzą, a stan przeliczy się sam.</span><div class="btns"><button class="btn sm" data-go="ust" data-ust="powiazania">Powiąż</button></div></div>`;
+  if(!rows.length){
+    html+=`<div class="empty"><h2>Nic tu jeszcze nie ma</h2><p class="muted">Stan pojawi się po dodaniu pierwszego zamówienia. Wgraj PDF z zamówieniem albo dopisz towar ręcznie.</p><div class="btns"><button class="btn" data-go="dodaj">Dodaj zamówienie</button></div></div>`;
+    el.innerHTML=html;return;
+  }
+  html+=`<input class="search" id="q" type="search" placeholder="Szukaj produktu" value="${esc(query)}" aria-label="Szukaj produktu">`;
+  const qn=query.trim().toLowerCase();
+  const shown=rows.filter(r=>!qn||pname(r.k).toLowerCase().includes(qn)||r.k.includes(qn));
+  const rank=r=>({crit:0,warn:1,'':2})[lvl(r)];
+  for(const cat of Object.keys(CATS)){
+    const g=shown.filter(r=>pcat(r.k)===cat).sort((a,b)=>rank(a)-rank(b)||pname(a.k).localeCompare(pname(b.k),'pl'));
+    if(!g.length) continue;
+    html+=`<div class="group"><h3>${CATS[cat]} · ${g.length}</h3><div class="list">`+g.map(r=>{
+      const x=r.x,pct=r.supply?Math.max(0,Math.min(100,r.rem/r.supply*100)):0;
+      let meta=`dostawy ${fmt(x.inn)} · zeszło ${fmt(x.out)}`;
+      if(scope!=='all'&&(x.tin||x.tout)) meta+=` · przerzuty ${x.tin?'+'+fmt(x.tin):''}${x.tin&&x.tout?' / ':''}${x.tout?'−'+fmt(x.tout):''}`;
+      const per=scope==='all'&&conts().length>1?`<div class="per">${conts().map(c=>{const p=r.per[c.id];if(!p)return '';const v=remOf(p);return `<span class="num${v<0?' neg':''}">${esc(c.name)}: ${fmt(v)}</span>`}).join('')}</div>`:'';
+      return `<div class="item ${lvl(r)}"><div class="nm">${esc(pname(r.k))}</div><div class="rem num">${fmt(r.rem)}</div><div class="meta num">${meta}</div>${per}<div class="bar"><i style="width:${pct}%"></i></div></div>`;
+    }).join('')+`</div></div>`;
+  }
+  if(!shown.length) html+=`<p class="muted">Brak produktu pasującego do „${esc(query)}”.</p>`;
+  el.innerHTML=html;
+}
+
+function renderHist(){
+  const el=$('#v-hist'),e=ev();
+  if(!e){el.innerHTML=noEvent();return}
+  const {isAct}=compute();
+  let list=[...ops].sort((a,b)=>b.at-a.at);
+  if(scope!=='all') list=list.filter(o=>o.container===scope||o.from===scope||o.to===scope);
+  if(!list.length){el.innerHTML=`<h2>Historia</h2><div class="empty"><p class="muted">Tu pojawi się każde zamówienie, raport sprzedaży, domówienie i przerzut. Błędny wpis można usunąć.</p></div>`;return}
+  el.innerHTML=`<h2>Historia</h2>`+list.map(o=>{
+    const [lab,cls]=TYPES[o.type]||['?',''];
+    const where=o.type==='transfer'?`${esc(cname(o.from))} → ${esc(cname(o.to))}`:esc(cname(o.container));
+    const tot=(o.items||[]).reduce((s,i)=>s+(+i.q||0),0);
+    const act=isAct(o);
+    let info=[];
+    if(o.doc) info.push('nr '+esc(o.doc));
+    if(o.type==='sale') info.push((o.from?esc(o.from)+' – '+esc(o.to):'')+(o.mode==='cum'?' (narastający)':' (przyrostowy)'));
+    if(o.label) info.push(esc(o.label));
+    info.push(`${(o.items||[]).length} poz., razem ${fmt(tot)}`);
+    if(!act) info.push('zastąpiony nowszym raportem');
+    const del=pendingDel===o.id?`<button class="btn danger sm" data-del="${o.id}">Usuń na pewno</button><button class="btn ghost" data-undel>Anuluj</button>`:`<button class="btn ghost" data-askdel="${o.id}">Usuń</button>`;
+    return `<div class="op${act?'':' off'}"><div class="h"><span class="tag ${cls}">${lab}</span><b>${where}</b><span class="when">${when(o.at)}</span></div>
+      <div class="small muted">${info.join(' · ')}</div>
+      <details><summary>Pozycje</summary><ul>${(o.items||[]).map(i=>`<li><span>${esc(o.type==='sale'?prettyName(i.n):pname(i.k))}</span><b class="num">${fmt(i.q)}</b></li>`).join('')}</ul></details>
+      <div class="btns">${del}</div></div>`;
+  }).join('');
+}
+
+/* ---------- Dodaj ---------- */
+const KINDS=[['order','Zamówienie','PDF „Wydruk zamówienia”'],['sale','Sprzedaż','PDF „Szczegóły sprzedaży”'],['manual','Domówienie','Ręcznie, bez PDF'],['transfer','Przerzut','Między kontenerami']];
+function newDraft(kind){
+  const c=scope!=='all'?scope:(conts()[0]?.id||'');
+  return {kind,container:c,to:conts().find(x=>x.id!==c)?.id||'',mode:lsx.get('kontenery.mode')||'cum',items:(kind==='manual'||kind==='transfer')?[{name:'',q:'',cat:'inne'}]:[],meta:null,label:'',status:null,busy:false,confirmDup:false,text:''};
+}
+function renderForm(){
+  const el=$('#v-dodaj'),e=ev();
+  if(!e){el.innerHTML=noEvent();return}
+  let html=`<div class="actions">${KINDS.map(([k,n,d])=>`<button class="act" data-kind="${k}" aria-pressed="${draft?.kind===k}"><span class="tag ${TYPES[k][1]}">${TYPES[k][0]}</span><b>${n}</b><span>${d}</span></button>`).join('')}</div>`;
+  if(draft) html+=formPanel(draft);
+  el.innerHTML=html;
+}
+const contSel=(id,val,label)=>`<label class="f">${label}<select class="in" id="${id}">${conts().map(c=>`<option value="${esc(c.id)}"${c.id===val?' selected':''}>${esc(c.name)}${c.shop?' ('+esc(c.shop)+')':''}</option>`).join('')}</select></label>`;
+function formPanel(d){
+  let h=`<div class="panel">`;
+  if(d.kind==='order'||d.kind==='sale'){
+    h+=`<div class="drop" id="drop"><b>Wgraj PDF</b><span class="small muted">${d.kind==='order'?'Wydruk zamówienia bieżącego':'Szczegóły sprzedaży towarów w okresie'}</span><input type="file" id="f-file" accept="application/pdf,.pdf,.txt,.csv" style="max-width:100%"></div>
+    <details${d.text?' open':''}><summary class="small muted" style="cursor:pointer">…albo wklej tekst z dokumentu</summary><textarea class="in" id="f-text" placeholder="Zaznacz w PDF wszystko, skopiuj i wklej tutaj">${esc(d.text)}</textarea><div class="btns" style="margin-top:8px"><button class="btn sec sm" data-readtext>Odczytaj tekst</button></div></details>`;
+  }
+  if(d.status) h+=`<div class="note ${d.status[0]}">${esc(d.status[1])}</div>`;
+  const ready=d.kind==='manual'||d.kind==='transfer'||d.items.length;
+  if(!ready) return h+'</div>';
+  if(d.meta){
+    const k=[];
+    if(d.meta.doc) k.push(`Nr zamówienia <b>${esc(d.meta.doc)}</b>`);
+    if(d.meta.shop) k.push(`Sklep <b>${esc(d.meta.shop)}</b>`);
+    if(d.meta.date) k.push(`Dostawa <b>${esc(d.meta.date)}</b>`);
+    if(d.meta.from) k.push(`Okres <b>${esc(d.meta.from)} – ${esc(d.meta.to)}</b>`);
+    if(k.length) h+=`<div class="kv">${k.map(x=>`<span>${x}</span>`).join('')}</div>`;
+  }
+  if(d.kind==='transfer') h+=`<div class="row2">${contSel('f-from',d.container,'Z kontenera')}${contSel('f-to',d.to,'Do kontenera')}</div>`;
+  else h+=contSel('f-cont',d.container,'Kontener');
+  const c=conts().find(x=>x.id===d.container);
+  if(d.meta?.shop&&c&&!c.shop) h+=`<p class="small muted">Po zapisaniu kontener „${esc(c.name)}” zapamięta kod sklepu ${esc(d.meta.shop)} i następne dokumenty z tym kodem trafią do niego same.</p>`;
+  if(d.meta?.shop&&c?.shop&&c.shop!==d.meta.shop) h+=`<div class="note err">Dokument jest ze sklepu ${esc(d.meta.shop)}, a wybrany kontener ma kod ${esc(c.shop)}. Sprawdź kontener.</div>`;
+  if(d.kind==='sale') h+=`<div class="f">Rodzaj raportu<div class="seg" role="group"><button data-mode="cum" aria-pressed="${d.mode==='cum'}">Od początku eventu</button><button data-mode="inc" aria-pressed="${d.mode==='inc'}">Tylko nowa sprzedaż</button></div>
+    <span class="small muted" style="font-weight:400">${d.mode==='cum'?'Raport z tą samą datą początku zastępuje poprzedni raport tego kontenera, więc nic nie odejmie się dwa razy. Wgrywaj zawsze raport od pierwszego dnia eventu do teraz.':'Każdy raport odejmuje się osobno. Wybierz to tylko wtedy, gdy raporty nie zachodzą na siebie, np. osobny raport za każdą godzinę.'}</span></div>`;
+  if(d.kind==='order'||d.kind==='sale') h+=`<h3>Pozycje (${d.items.length})</h3>`;
+  h+=`<div class="rows">${d.items.map((it,i)=>itemRow(it,i,d)).join('')}</div>`;
+  if(d.kind!=='sale') h+=`<div class="btns"><button class="btn ghost" data-addrow>+ dodaj pozycję</button></div>`;
+  if(d.kind==='manual') h+=`<label class="f">Notatka (opcjonalnie)<input class="in" id="f-label" placeholder="np. stan początkowy, domówienie telefoniczne" value="${esc(d.label)}"></label><p class="small muted">Ujemna ilość działa jak korekta, np. strata albo zwrot.</p>`;
+  if(d.dup) h+=`<div class="note err">${esc(d.dup)}</div>`;
+  h+=`<div class="btns"><button class="btn" data-save ${d.busy?'disabled':''}>${d.dup?'Zapisz mimo to':'Zapisz'}</button><button class="btn sec" data-cancel>Anuluj</button></div>`;
+  return h+'</div>';
+}
+function itemRow(it,i,d){
+  if(d.kind==='order'){
+    const known=prods()[it.i];
+    return `<div class="prow"><div class="nm">${esc(prettyName(it.name))}</div><input class="in num" type="number" step="any" inputmode="decimal" data-i="${i}" data-f="q" value="${esc(it.q)}" aria-label="Ilość"><button class="x" data-rm="${i}" aria-label="Usuń pozycję">×</button><div class="sub">${esc(it.i)} · ${known?CATS[known.cat]:'nowy · '+CATS[it.cat]}</div></div>`;
+  }
+  if(d.kind==='sale'){
+    const r=resolve(it.i,it.name);
+    let sub,cls='';
+    if(!r){const s=suggest(it.i,it.name);sub=s?`do powiązania · podpowiedź: ${pname(s)}`:'do powiązania ze stanem';cls='w'}
+    else if(r.skip){sub=r.auto?'kaucja, nie wpływa na stan':'pomijane';cls='s'}
+    else sub='zdejmuje: '+r.parts.map(p=>(+p.q!==1?fmt(p.q)+' × ':'')+pname(p.k)).join(', ');
+    return `<div class="prow"><div class="nm">${esc(prettyName(it.name))}</div><input class="in num" type="number" step="any" inputmode="decimal" data-i="${i}" data-f="q" value="${esc(it.q)}" aria-label="Ilość"><button class="x" data-rm="${i}" aria-label="Usuń pozycję">×</button><div class="sub ${cls}">${esc(sub)}</div></div>`;
+  }
+  // manual / transfer
+  const known=it.name&&findProd(it.name);
+  const cat=d.kind==='manual'&&!known?`<select class="in cat" data-i="${i}" data-f="cat" aria-label="Kategoria">${Object.entries(CATS).map(([k,n])=>`<option value="${k}"${it.cat===k?' selected':''}>${n}</option>`).join('')}</select>`:'';
+  return `<div class="mrow" style="padding:6px 0"><input class="in" list="prodlist" data-i="${i}" data-f="name" value="${esc(it.name)}" placeholder="Produkt" aria-label="Produkt"><input class="in num" type="number" step="any" inputmode="decimal" data-i="${i}" data-f="q" value="${esc(it.q)}" placeholder="Ilość" aria-label="Ilość"><button class="x" data-rm="${i}" aria-label="Usuń pozycję" style="border:0;background:none;color:var(--muted);font-size:20px">×</button>${cat}</div>`;
+}
+const findProd=name=>{const n=name.trim().toLowerCase();return Object.keys(prods()).find(k=>prods()[k].name.toLowerCase()===n||k===n)||null};
+
+async function pdfRows(buf){
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;const rows=[];
+  for(let p=1;p<=Math.min(pdf.numPages,60);p++){
+    const page=await pdf.getPage(p);const tc=await page.getTextContent();const rs=[];
+    for(const it of tc.items){if(!it.str||!it.str.trim())continue;const y=it.transform[5];let r=rs.find(r=>Math.abs(r.y-y)<3);if(!r){r={y,parts:[]};rs.push(r)}r.parts.push([it.transform[4],it.str.trim()])}
+    rs.sort((a,b)=>b.y-a.y);for(const r of rs) rows.push(r.parts.sort((a,b)=>a[0]-b[0]).map(x=>x[1]));
+  }
+  return rows;
+}
+function applyParsed(res,label){
+  const d=draft;if(!d)return;
+  if(!res.items.length){d.status=['err','Nie znalazłam pozycji w tym dokumencie. Sprawdź, czy to właściwy PDF, albo wklej jego tekst.'];d.items=[];return renderForm()}
+  if(res.kind!==d.kind){draft=newDraft(res.kind);return applyParsed(res,label)}
+  d.meta=res;d.label=label||'';
+  d.items=res.kind==='order'?res.items.map(x=>({i:x.i,name:x.name,sub:x.sub,q:String(x.q),cat:guessCat(x.name,x.sub)})):res.items.map(x=>({i:x.i,name:x.name,q:String(x.q)}));
+  const c=conts().find(x=>x.shop&&x.shop===res.shop);if(c)d.container=c.id;
+  d.status=['ok',`Odczytano ${res.items.length} pozycji${c?', kontener '+c.name+' rozpoznany po kodzie sklepu':''}. Sprawdź i zapisz.`];
+  d.dup=dupCheck(d);renderForm();
+}
+function dupCheck(d){
+  if(d.kind==='order'&&d.meta?.doc){const o=ops.find(o=>o.type==='order'&&o.doc===d.meta.doc);if(o)return `Zamówienie ${d.meta.doc} zostało już dodane ${when(o.at)} do kontenera ${cname(o.container)}.`}
+  if(d.kind==='sale'&&d.meta?.from){const tot=d.items.reduce((s,i)=>s+(+i.q||0),0);const o=ops.find(o=>o.type==='sale'&&o.container===d.container&&o.from===d.meta.from&&o.to===d.meta.to&&(o.items||[]).reduce((s,i)=>s+(+i.q||0),0)===tot);if(o)return `Ten sam raport (${d.meta.from} – ${d.meta.to}) jest już wgrany do tego kontenera.`}
+  return '';
+}
+async function handleFile(file){
+  if(!file||!draft)return;
+  draft.status=['info','Czytam plik…'];renderForm();
+  try{
+    let rows;
+    if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)) rows=await pdfRows(await file.arrayBuffer());
+    else rows=textToRows(await file.text());
+    if(!rows.length||rows.join('').replace(/\W/g,'').length<20){draft.status=['err','Ten PDF nie zawiera tekstu (to skan albo zdjęcie). Dopisz pozycje ręcznie jako domówienie.'];return renderForm()}
+    applyParsed(parseRows(rows),file.name);
+  }catch(e){draft.status=['err','Nie udało się otworzyć pliku. Sprawdź, czy to poprawny PDF.'];renderForm()}
+}
+
+async function saveDraft(){
+  const d=draft,e=ev();if(!d||!e||d.busy)return;
+  if(!d.container){d.status=['err','Najpierw dodaj kontener w Ustawieniach.'];return renderForm()}
+  const valid=d.items.filter(i=>(i.i||i.name.trim())&&i.q!==''&&isFinite(+i.q)&&+i.q!==0);
+  if(!valid.length){d.status=['err','Dodaj co najmniej jedną pozycję z nazwą i ilością.'];return renderForm()}
+  if(d.kind==='transfer'&&d.container===d.to){d.status=['err','Wybierz dwa różne kontenery.'];return renderForm()}
+  if(d.kind==='transfer'&&valid.some(i=>!findProd(i.name))){d.status=['err','Przerzucać można tylko produkty, które są już na stanie. Wybierz nazwę z listy.'];return renderForm()}
+  if(d.dup&&!d.confirmDup){d.confirmDup=true;d.status=['err','Kliknij jeszcze raz „Zapisz mimo to”, jeśli na pewno chcesz dodać ten dokument drugi raz.'];return renderForm()}
+  const patch={};const op={type:d.kind,at:Date.now(),label:d.label||''};
+  if(d.kind==='order'){
+    const agg={};
+    for(const it of valid){agg[it.i]=(agg[it.i]||0)+(+it.q);if(!prods()[it.i]&&!patch['products.'+it.i])patch['products.'+it.i]={name:prettyName(it.name),cat:it.cat||'inne',sub:it.sub||''}}
+    op.items=Object.entries(agg).map(([k,q])=>({k,q}));op.doc=d.meta?.doc||'';op.container=d.container;
+  }else if(d.kind==='sale'){
+    op.items=valid.map(it=>({i:it.i,n:it.name,q:+it.q}));op.container=d.container;op.mode=d.mode;op.from=d.meta?.from||'';op.to=d.meta?.to||'';
+  }else{
+    const agg={};
+    for(const it of valid){let k=findProd(it.name);if(!k){k=slug(it.name);if(!patch['products.'+k])patch['products.'+k]={name:it.name.trim(),cat:it.cat||'inne'}}agg[k]=(agg[k]||0)+(+it.q)}
+    op.items=Object.entries(agg).map(([k,q])=>({k,q}));
+    if(d.kind==='transfer'){op.from=d.container;op.to=d.to}else op.container=d.container;
+  }
+  const c=conts().find(x=>x.id===d.container);
+  if(d.meta?.shop&&c&&!c.shop) patch.containers=conts().map(x=>x.id===c.id?{...x,shop:d.meta.shop}:x);
+  d.busy=true;d.status=['info','Zapisuję…'];renderForm();
+  try{
+    if(Object.keys(patch).length) await store.updateEvent(e.id,patch);
+    await store.addOp(e.id,op);
+    draft=null;renderForm();
+    const un=d.kind==='sale'?op.items.filter(i=>!resolve(i.i,i.n)).length:0;
+    toast(un?`Zapisano. ${un} poz. czeka na powiązanie w Ustawieniach.`:'Zapisano. Stan jest przeliczony.');
+  }catch(err){d.busy=false;d.status=['err','Nie udało się zapisać. Sprawdź internet i spróbuj ponownie.'];renderForm()}
+}
+
+/* ---------- Ustawienia ---------- */
+function renderUst(){
+  const el=$('#v-ust'),e=ev();
+  const {unmapped,seen}=e?compute():{unmapped:{},seen:{}};
+  const nUn=Object.keys(unmapped).length;
+  const tabs=[['powiazania','Powiązania',nUn],['produkty','Produkty'],['event','Event i kontenery'],['baza','Baza i zespół']];
+  if(!e&&ustTab!=='baza') ustTab='event';
+  let html=`<div class="subtabs">${tabs.map(([k,n,c])=>`<button data-ustab="${k}" aria-pressed="${ustTab===k}">${n}${c?`<span class="cnt">${c}</span>`:''}</button>`).join('')}</div>`;
+  if(ustTab==='powiazania') html+=e?renderLinks(seen,unmapped):noEvent();
+  if(ustTab==='produkty') html+=e?renderProds():noEvent();
+  if(ustTab==='event') html+=renderEventSet();
+  if(ustTab==='baza') html+=renderBaza();
+  el.innerHTML=html;
+}
+function renderLinks(seen,unmapped){
+  const all=Object.values(seen);
+  if(!all.length) return `<div class="panel"><h2>Powiązania sprzedaży</h2><p class="muted">Kasa często ma inny indeks niż zamówienie, np. pizza „na ciepło” w sprzedaży i pizza mrożona w zamówieniu. Tutaj wskazujesz, z którego produktu schodzi każda sprzedana pozycja. Możesz też dodać opakowania, np. kawa 200 ml zdejmuje 1 kubek i 1 wieczko.</p><p class="muted">Lista pojawi się po wgraniu pierwszego raportu sprzedaży.</p></div>`;
+  const un=all.filter(s=>unmapped[s.i]),ok=all.filter(s=>!unmapped[s.i]);
+  const block=s=>{
+    const r=resolve(s.i,s.name);
+    let st,cls='';
+    if(!r){st='Nie powiązane, nie zmniejsza stanu';cls='w'}
+    else if(r.skip) st=r.auto?'Kaucja, pomijana automatycznie':'Pomijane';
+    else st=(r.auto?'Ten sam indeks co w zamówieniu: ':'Zdejmuje: ')+r.parts.map(p=>(+p.q!==1?fmt(p.q)+' × ':'')+pname(p.k)).join(' + ');
+    let ed='';
+    if(openLink===s.i){
+      const parts=linkEdit||[];
+      ed=`<div class="rows">${parts.map((p,j)=>`<div class="mrow"><select class="in" data-lp="${j}" data-lf="k"><option value="">Wybierz produkt…</option>${prodOptions(p.k)}</select><input class="in num" type="number" step="any" inputmode="decimal" data-lp="${j}" data-lf="q" value="${esc(p.q)}" aria-label="Ilość na 1 sprzedaną"><button class="x" data-lrm="${j}" aria-label="Usuń składnik" style="border:0;background:none;color:var(--muted);font-size:20px">×</button></div>`).join('')}</div>
+      <p class="small muted">Ilość = ile sztuk schodzi przy sprzedaży 1 szt. Dodaj kolejne składniki dla opakowań (kubek, wieczko, pudełko).</p>
+      <div class="btns"><button class="btn ghost" data-ladd>+ składnik</button></div>
+      <div class="btns"><button class="btn sm" data-lsave="${esc(s.i)}">Zapisz</button><button class="btn sec sm" data-lself="${esc(s.i)}">Osobny produkt</button><button class="btn sec sm" data-lskip="${esc(s.i)}">Pomijaj</button>${links()[s.i]?`<button class="btn ghost" data-lclear="${esc(s.i)}">Przywróć domyślne</button>`:''}<button class="btn ghost" data-lclose>Zamknij</button></div>
+      <p class="small muted">„Osobny produkt” — ta pozycja ma własny stan (np. napoje dowożone bez zamówienia w PDF). Dopisz jej dostawy jako domówienie.</p>`;
+    }
+    return `<div class="link"><div class="t"><b>${esc(prettyName(s.name))}</b><span class="small muted num">${esc(s.i)} · sprzedane ${fmt(s.q)}</span></div><div class="st ${cls}">${esc(st)}</div>${ed||`<div class="btns"><button class="btn ${r?'sec':''} sm" data-lopen="${esc(s.i)}">${r?'Zmień':'Powiąż'}</button></div>`}</div>`;
+  };
+  return `<div class="panel"><h2>Powiązania sprzedaży</h2><p class="small muted">Wskaż raz, z którego produktu schodzi każda sprzedana pozycja. Zmiana przelicza też wcześniejsze raporty.</p>
+    ${un.filter(s=>!suggest(s.i,s.name)).length>1?`<div class="note info">Pozycje spoza zamówień PDF (np. napoje dowożone osobno) możesz ustawić hurtem jako osobne produkty. Ich dostawy dopiszesz jako domówienie, np. „stan początkowy”.<div class="btns" style="margin-top:8px"><button class="btn sm" data-lbulk>Ustaw ${un.filter(s=>!suggest(s.i,s.name)).length} bez podpowiedzi jako osobne produkty</button></div></div>`:''}
+    ${un.length?`<h3>Do powiązania · ${un.length}</h3><div>${un.map(block).join('')}</div>`:'<div class="note ok">Wszystkie sprzedane pozycje są powiązane.</div>'}
+    ${ok.length?`<h3>Powiązane · ${ok.length}</h3><div>${ok.map(block).join('')}</div>`:''}</div>`;
+}
+function prodOptions(sel){return Object.keys(CATS).map(c=>{const ps=Object.entries(prods()).filter(([k,p])=>p.cat===c).sort((a,b)=>a[1].name.localeCompare(b[1].name,'pl'));return ps.length?`<optgroup label="${CATS[c]}">${ps.map(([k,p])=>`<option value="${esc(k)}"${k===sel?' selected':''}>${esc(p.name)}</option>`).join('')}</optgroup>`:''}).join('')}
+function renderProds(){
+  const ps=Object.entries(prods()).sort((a,b)=>a[1].name.localeCompare(b[1].name,'pl'));
+  if(!ps.length) return `<div class="panel"><p class="muted">Produkty pojawią się po wgraniu pierwszego zamówienia.</p></div>`;
+  return `<div class="panel"><h2>Produkty</h2><p class="small muted">Kategoria decyduje, w której grupie produkt widać na stanie.</p><div>${ps.map(([k,p])=>`<div class="link"><div class="t"><b>${esc(p.name)}</b><span class="small muted num">${k.startsWith('m_')?'dopisany ręcznie':esc(k)}</span></div><select class="in" data-pcat="${esc(k)}" aria-label="Kategoria">${Object.entries(CATS).map(([c,n])=>`<option value="${c}"${p.cat===c?' selected':''}>${n}</option>`).join('')}</select></div>`).join('')}</div></div>`;
+}
+function renderEventSet(){
+  const e=ev();let h='';
+  if(!store) return `<div class="panel"><p class="muted">${storeErr?esc(storeErr):'Łączę z bazą…'}</p></div>`;
+  if(e){
+    h+=`<div class="panel"><h2>${esc(e.name)}</h2><h3>Kontenery</h3>
+      <div class="crow small muted"><span>Nazwa</span><span>Kod sklepu</span></div>
+      ${conts().map(c=>`<div class="crow"><input class="in" data-cname="${esc(c.id)}" value="${esc(c.name)}" aria-label="Nazwa kontenera"><input class="in" data-cshop="${esc(c.id)}" value="${esc(c.shop||'')}" placeholder="np. Z7716" aria-label="Kod sklepu"></div>`).join('')}
+      <p class="small muted">Kod sklepu z PDF (np. Z7716) pozwala od razu przypisać dokument do kontenera. Uzupełnia się sam przy pierwszym dokumencie.</p>
+      <div class="btns"><button class="btn sec sm" data-addc>Dodaj kontener</button></div></div>`;
+  }
+  if(events.length) h+=`<div class="panel"><h3>Eventy</h3><div style="display:flex;flex-direction:column;gap:6px">${events.map(x=>`<button class="evbtn" data-ev="${esc(x.id)}" aria-current="${x.id===evId}"><span>${esc(x.name)}</span><span class="small muted">${(x.containers||[]).length} kont.</span></button>`).join('')}</div>
+    ${e?(confirmEv?`<div class="note err">Usunąć event „${esc(e.name)}”? Lista produktów i powiązań zniknie.</div><div class="btns"><button class="btn danger sm" data-delev>Usuń event</button><button class="btn ghost" data-nodelev>Anuluj</button></div>`:`<div class="btns"><button class="btn ghost" data-askdelev>Usuń bieżący event</button></div>`):''}</div>`;
+  h+=`<div class="panel"><h2>${e?'Nowy event':'Zacznij od eventu'}</h2>
+    <div class="row2"><label class="f">Nazwa eventu<input class="in" id="nev-name" placeholder="np. Festiwal, sierpień"></label><label class="f">Liczba kontenerów<input class="in" id="nev-n" type="number" min="1" max="30" value="2"></label></div>
+    ${e&&Object.keys(e.links||{}).length?`<label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="nev-copy" checked> Skopiuj produkty i powiązania z „${esc(e.name)}”</label>`:''}
+    <div class="btns"><button class="btn" data-newev>Utwórz event</button></div></div>`;
+  return h;
+}
+function renderBaza(){
+  const rules=`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}`;
+  if(store?.mode==='cloud'){
+    return `<div class="panel"><h2>Wspólna baza</h2><p>Połączono z projektem <b>${esc(store.project)}</b>. Wszyscy z linkiem widzą te same dane na bieżąco. Bez internetu zmiany zapiszą się po odzyskaniu połączenia.</p>
+      ${FIREBASE_CONFIG?'<p class="small muted">Konfiguracja jest wbudowana w plik, więc wystarczy zwykły adres strony.</p>':`<h3>Link dla zespołu</h3><p class="small muted">Wyślij ten link osobom z ekipy. Po otwarciu połączą się z tą samą bazą.</p><input class="in" id="teamlink" readonly value="${esc(teamLink(cfg))}"><div class="btns"><button class="btn sm" data-copylink>Kopiuj link</button></div>`}
+      ${FIREBASE_CONFIG?'':'<div class="btns"><button class="btn ghost" data-disconnect>Odłącz to urządzenie od bazy</button></div>'}</div>`;
+  }
+  return `<div class="panel"><h2>Wspólna baza dla zespołu</h2>
+    <p>${storeErr?`<span class="note err" style="display:block">${esc(storeErr)}</span>`:'Teraz dane zapisują się tylko na tym urządzeniu. Żeby cała ekipa widziała ten sam stan, podłącz darmową bazę Firebase (jednorazowo, ok. 10 minut).'}</p>
+    <ol class="steps">
+      <li>Wejdź na <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a>, zaloguj się kontem Google i kliknij <b>Utwórz projekt</b> (Google Analytics możesz wyłączyć).</li>
+      <li>W menu <b>Build → Authentication</b> kliknij <b>Rozpocznij</b>, potem w zakładce <b>Sign-in method</b> włącz <b>Anonimowe</b>.</li>
+      <li>W menu <b>Build → Firestore Database</b> kliknij <b>Utwórz bazę danych</b>, lokalizacja <b>eur3 (Europa)</b>, tryb produkcyjny.</li>
+      <li>W Firestore otwórz zakładkę <b>Reguły</b>, wklej poniższe i kliknij <b>Opublikuj</b>:<pre>${esc(rules)}</pre></li>
+      <li>Wejdź w <b>Ustawienia projektu</b> (zębatka) → <b>Twoje aplikacje</b> → ikona <b>&lt;/&gt;</b> (aplikacja internetowa), nadaj nazwę i zarejestruj. Skopiuj cały blok <code>const firebaseConfig = {…}</code>.</li>
+      <li>Jeśli strona stoi pod własnym adresem (np. Netlify), dodaj go w <b>Authentication → Settings → Authorized domains</b>.</li>
+    </ol>
+    <label class="f">Konfiguracja Firebase<textarea class="in" id="cfgtext" placeholder="const firebaseConfig = { apiKey: &quot;…&quot;, … };"></textarea></label>
+    <div class="btns"><button class="btn" data-connect>Połącz</button></div></div>`;
+}
+
+/* ======================================================================
+   ZDARZENIA
+   ====================================================================== */
+function setView(v){
+  view=v;for(const s of ['stan','dodaj','hist','ust'])$('#v-'+s).hidden=s!==v;
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.tab===v?'page':'false'));
+  renderView(v);window.scrollTo(0,0);
+}
+function renderView(v){({stan:renderStan,dodaj:renderForm,hist:renderHist,ust:renderUst})[v]()}
+function renderAll(){renderHeader();if(view!=='dodaj'||!draft)renderView(view);else renderForm()}
+function rerenderAll(){renderHeader();const a=document.activeElement;if(view==='ust'&&a&&(a.dataset.cname||a.dataset.cshop||a.dataset.lp))return;renderView(view)}
+
+document.addEventListener('click',async e_=>{
+  const t=e_.target.closest('button');if(!t)return;
+  const D=t.dataset;
+  if(D.tab) return setView(D.tab);
+  if(D.go){if(D.ust)ustTab=D.ust;return setView(D.go)}
+  if(D.scope){scope=D.scope;lsx.set('kontenery.scope',scope);renderHeader();renderView(view);return}
+  if(D.kind){draft=draft?.kind===D.kind?null:newDraft(D.kind);return renderForm()}
+  if(D.mode&&draft){draft.mode=D.mode;lsx.set('kontenery.mode',D.mode);return renderForm()}
+  if('addrow' in D&&draft){draft.items.push({name:'',q:'',cat:'inne'});renderForm();return}
+  if(D.rm&&draft){draft.items.splice(+D.rm,1);draft.dup=dupCheck(draft);return renderForm()}
+  if('cancel' in D){draft=null;return renderForm()}
+  if('save' in D) return saveDraft();
+  if('readtext' in D&&draft){draft.text=$('#f-text').value;const rows=textToRows(draft.text);if(rows.length)applyParsed(parseRows(rows),'wklejony tekst');return}
+  if(D.askdel){pendingDel=D.askdel;return renderHist()}
+  if('undel' in D){pendingDel=null;return renderHist()}
+  if(D.del){pendingDel=null;try{await store.deleteOp(evId,D.del);toast('Usunięto wpis.')}catch{toast('Nie udało się usunąć.')}return}
+  if(D.ustab){ustTab=D.ustab;openLink=null;return renderUst()}
+  if(D.lopen){openLink=D.lopen;const L=links()[openLink];const r=resolve(openLink,'');const s=compute().seen[openLink];
+    linkEdit=L?.parts?.length?L.parts.map(p=>({...p})):r?.parts?r.parts.map(p=>({...p})):[{k:suggest(openLink,s?.name||'')||'',q:1}];return renderUst()}
+  if('lclose' in D){openLink=null;return renderUst()}
+  if('ladd' in D){linkEdit.push({k:'',q:1});return renderUst()}
+  if(D.lrm){linkEdit.splice(+D.lrm,1);return renderUst()}
+  if(D.lsave){const parts=(linkEdit||[]).filter(p=>p.k&&+p.q>0).map(p=>({k:p.k,q:+p.q}));if(!parts.length){toast('Wybierz co najmniej jeden produkt.');return}
+    openLink=null;await store.updateEvent(evId,{['links.'+D.lsave]:{parts}});renderUst();toast('Zapisano powiązanie.');return}
+  if(D.lskip){openLink=null;await store.updateEvent(evId,{['links.'+D.lskip]:{skip:true}});renderUst();return}
+  if(D.lclear){openLink=null;await store.updateEvent(evId,{['links.'+D.lclear]:null});renderUst();return}
+  if('lbulk' in D){const {unmapped}=compute();const p={};let n=0;for(const u of Object.values(unmapped)){if(suggest(u.i,u.name))continue;p['products.'+u.i]={name:prettyName(u.name),cat:guessCat(u.name)};n++}if(n){await store.updateEvent(evId,p);renderUst();toast(n+' poz. ustawiono jako osobne produkty.')}return}
+  if(D.lself){const s=compute().seen[D.lself];const p={['links.'+D.lself]:null};if(!prods()[D.lself])p['products.'+D.lself]={name:prettyName(s?.name||D.lself),cat:guessCat(s?.name||'')};openLink=null;await store.updateEvent(evId,p);renderUst();toast('Dodano jako osobny produkt. Dopisz jego dostawy jako domówienie.');return}
+  if(D.ev){selectEvent(D.ev);return setView('stan')}
+  if('addc' in D){const cs=[...conts(),{id:'c'+uid(),name:'Kontener '+(conts().length+1),shop:''}];await store.updateEvent(evId,{containers:cs});return}
+  if('askdelev' in D){confirmEv=true;return renderUst()}
+  if('nodelev' in D){confirmEv=false;return renderUst()}
+  if('delev' in D){confirmEv=false;const id=evId;evId=null;await store.deleteEvent(id);toast('Usunięto event.');return}
+  if('newev' in D){
+    const name=$('#nev-name').value.trim()||'Nowy event';const n=Math.max(1,Math.min(30,parseInt($('#nev-n').value)||1));const copy=$('#nev-copy')?.checked&&ev();
+    t.disabled=true;
+    try{const id=await store.createEvent({name,containers:Array.from({length:n},(_,i)=>({id:'c'+uid()+i,name:'Kontener '+(i+1),shop:''})),products:copy?{...copy.products}:{},links:copy?{...copy.links}:{},createdAt:Date.now()});selectEvent(id);setView('stan');toast('Utworzono event.')}
+    catch{t.disabled=false;toast('Nie udało się utworzyć eventu.')}
+    return;
+  }
+  if('connect' in D){
+    const c=parseConfig($('#cfgtext').value);
+    if(!c){toast('Nie widzę apiKey, projectId i appId. Wklej cały blok firebaseConfig.');return}
+    lsx.set('kontenery.cfg',JSON.stringify(c));location.reload();return;
+  }
+  if('disconnect' in D){lsx.del('kontenery.cfg');location.reload();return}
+  if('copylink' in D){const inp=$('#teamlink');try{await navigator.clipboard.writeText(inp.value);toast('Skopiowano link.')}catch{inp.select();toast('Zaznaczono link, skopiuj go.')}return}
+});
+document.addEventListener('input',e_=>{
+  const t=e_.target;
+  if(t.id==='q'){query=t.value;const pos=t.selectionStart;renderStan();const q=$('#q');q.focus();try{q.setSelectionRange(pos,pos)}catch{}return}
+  if(t.dataset.lp!==undefined&&linkEdit){linkEdit[+t.dataset.lp][t.dataset.lf]=t.value;return}
+  if(!draft)return;
+  if(t.dataset.f){const it=draft.items[+t.dataset.i];if(it)it[t.dataset.f]=t.value;
+    if(t.dataset.f==='name'&&draft.kind==='manual'){const sel=t.parentElement.querySelector('select.cat');const k=findProd(t.value);if(k&&sel)sel.hidden=true;else if(!k&&!sel&&t.value.trim()){renderForm();const ins=document.querySelectorAll('[data-f="name"]')[+t.dataset.i];ins.focus();ins.setSelectionRange(ins.value.length,ins.value.length)}else if(sel)sel.hidden=false}
+    return}
+  if(t.id==='f-label')draft.label=t.value;if(t.id==='f-text')draft.text=t.value;
+});
+document.addEventListener('change',async e_=>{
+  const t=e_.target;
+  if(t.dataset.lp!==undefined&&linkEdit){linkEdit[+t.dataset.lp][t.dataset.lf]=t.value;return}
+  if(draft){
+    if(t.id==='f-cont'||t.id==='f-from'){draft.container=t.value;draft.dup=dupCheck(draft);renderForm()}
+    if(t.id==='f-to')draft.to=t.value;
+    if(t.id==='f-file')handleFile(t.files[0]);
+  }
+  if(t.dataset.cname||t.dataset.cshop){const id=t.dataset.cname||t.dataset.cshop,f=t.dataset.cname?'name':'shop';const cs=conts().map(c=>c.id===id?{...c,[f]:f==='name'?(t.value.trim()||c.name):t.value.trim().toUpperCase()}:c);try{await store.updateEvent(evId,{containers:cs})}catch{}}
+  if(t.dataset.pcat){await store.updateEvent(evId,{['products.'+t.dataset.pcat+'.cat']:t.value})}
+});
+document.addEventListener('dragover',e_=>{const d=e_.target.closest?.('#drop');if(d){e_.preventDefault();d.classList.add('over')}});
+document.addEventListener('dragleave',e_=>{e_.target.closest?.('#drop')?.classList.remove('over')});
+document.addEventListener('drop',e_=>{const d=e_.target.closest?.('#drop');if(d){e_.preventDefault();d.classList.remove('over');handleFile(e_.dataTransfer.files[0])}});
+
+/* ======================================================================
+   START
+   ====================================================================== */
+function selectEvent(id){
+  evId=id;if(id)lsx.set('kontenery.evId',id);
+  if(opsFor!==id){unOps?.();unOps=null;ops=[];opsFor=id;draft=null;openLink=null;
+    if(id) unOps=store.subscribeOps(id,list=>{ops=list;rerenderAll()},()=>toast('Utracono połączenie z bazą.'));
+  }
+  renderAll();
+}
+(async()=>{
+  try{if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'}catch{}
+  renderAll();
+  cfg=readConfig();
+  if(cfg){
+    try{store=await cloudStore(cfg)}
+    catch(err){
+      const code=String(err?.code||err?.message||'');
+      storeErr=code.includes('admin-restricted')||code.includes('operation-not-allowed')?'W Firebase nie jest włączone logowanie anonimowe (krok 2).':code.includes('unauthorized-domain')?'Ten adres strony nie jest dodany w Firebase (krok 6).':code==='script'?'Brak internetu albo zablokowane skrypty Firebase.':code.includes('api-key')?'Nieprawidłowa konfiguracja Firebase. Wklej ją jeszcze raz.':'Nie udało się połączyć z Firebase ('+code+').';
+      ustTab='baza';
+      store=localStore();
+    }
+  }else store=localStore();
+  store.subscribeEvents(list=>{
+    events=list.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+    if(!events.some(e=>e.id===evId)) evId=events.length?events[events.length-1].id:null;
+    if(opsFor!==evId) selectEvent(evId); else rerenderAll();
+  },err=>{storeErr=String(err?.code).includes('permission')?'Baza odrzuca dostęp. Sprawdź reguły Firestore (krok 4).':'Błąd bazy: '+(err?.message||'');ustTab='baza';renderAll()});
+})();
+</script>
+</body>
+</html>
